@@ -27,6 +27,7 @@ pub struct WorldConfig {
     pub terrain: TerrainConfig,
     pub erosion: ErosionConfig,
     pub climate: ClimateConfig,
+    pub hydrology: HydrologyConfig,
 }
 
 impl Default for WorldConfig {
@@ -42,6 +43,7 @@ impl Default for WorldConfig {
             terrain: TerrainConfig::default(),
             erosion: ErosionConfig::default(),
             climate: ClimateConfig::default(),
+            hydrology: HydrologyConfig::default(),
         }
     }
 }
@@ -66,6 +68,33 @@ impl Default for TerrainConfig {
 }
 
 pub const MAX_DROPLETS: u32 = 1_000_000;
+pub const MIN_RIVER_THRESHOLD: f32 = 5.0;
+pub const MAX_RIVER_THRESHOLD: f32 = 500.0;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HydrologyConfig {
+    /// Discharge at which a cell becomes a river, in units of one cell's
+    /// yearly runoff at 1000 mm of precipitation. Kept in
+    /// `MIN_RIVER_THRESHOLD..=MAX_RIVER_THRESHOLD` by the UI.
+    pub river_threshold: f32,
+    /// Smallest filled depression, in cells, recorded as a lake. Smaller ones
+    /// are still filled for drainage.
+    pub min_lake_cells: u32,
+    /// Minimum drop between a filled cell and the one it drains to, so flat
+    /// filled areas still drain (normalised height units).
+    pub fill_epsilon: f32,
+}
+
+impl Default for HydrologyConfig {
+    fn default() -> Self {
+        Self {
+            river_threshold: 60.0,
+            min_lake_cells: 6,
+            fill_epsilon: 1e-5,
+        }
+    }
+}
 
 /// Droplet-based hydraulic erosion. Heights are in normalised units.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -2,7 +2,10 @@
 //! generation, so recolouring never requires re-running the pipeline.
 
 use eframe::egui::ColorImage;
-use worldgen_core::{BoundaryKind, Climate, Heightmap, PlateKind, TectonicMap, NO_BOUNDARY};
+use worldgen_core::hydrology::NO_LAKE;
+use worldgen_core::{
+    BoundaryKind, Climate, Heightmap, Hydrology, PlateKind, TectonicMap, NO_BOUNDARY,
+};
 
 /// Colour stops for mean temperature, °C.
 pub const TEMPERATURE_SCALE: [(f32, Rgb); 6] = [
@@ -51,6 +54,50 @@ pub fn erosion_change(before: &Heightmap, after: &Heightmap, scale: f32) -> Colo
         })
         .collect();
     ColorImage::from_rgb([after.width, after.height], &rgb)
+}
+
+pub const LAKE: Rgb = [70, 135, 190];
+pub const RIVER: Rgb = [45, 105, 185];
+
+/// Hypsometric terrain with lakes drawn as flat water.
+pub fn terrain_with_lakes(map: &Heightmap, hydrology: &Hydrology, sea_level: f32) -> ColorImage {
+    let rgb: Vec<u8> = map
+        .data
+        .iter()
+        .zip(&hydrology.lake_id)
+        .flat_map(|(&h, &lake)| {
+            if lake != NO_LAKE {
+                LAKE
+            } else {
+                hypsometric_colour(h, sea_level)
+            }
+        })
+        .collect();
+    ColorImage::from_rgb([map.width, map.height], &rgb)
+}
+
+/// Flow accumulation on a log scale (dark = little upstream area), with sea
+/// and lakes in blue.
+pub fn flow_accumulation(map: &Heightmap, hydrology: &Hydrology, sea_level: f32) -> ColorImage {
+    let max = hydrology
+        .accumulation
+        .iter()
+        .cloned()
+        .fold(1.0f32, f32::max)
+        .ln_1p();
+    let rgb: Vec<u8> = (0..map.data.len())
+        .flat_map(|i| {
+            if map.data[i] < sea_level {
+                [20, 40, 80]
+            } else if hydrology.lake_id[i] != NO_LAKE {
+                LAKE
+            } else {
+                let t = hydrology.accumulation[i].ln_1p() / max;
+                [(t.sqrt() * 255.0) as u8; 3]
+            }
+        })
+        .collect();
+    ColorImage::from_rgb([map.width, map.height], &rgb)
 }
 
 /// Muted terrain to draw wind arrows over.

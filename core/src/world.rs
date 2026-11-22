@@ -1,7 +1,7 @@
 //! The generation pipeline: runs each stage in order from one [`WorldConfig`].
 //!
 //! Stages: tectonics and noise (independent) → blended heightmap → erosion →
-//! climate. Erosion can take seconds, so besides the blocking
+//! climate → hydrology. Erosion can take seconds, so besides the blocking
 //! [`World::generate`] and [`World::update`] there is an incremental path:
 //! [`World::set_config`] runs the cheap stages straight away and queues
 //! erosion and everything after it, and [`World::advance`] does the queued
@@ -12,6 +12,7 @@ use crate::config::WorldConfig;
 use crate::erosion::{erode, ErosionJob};
 use crate::fractal::fbm_field;
 use crate::heightmap::{blend_heightmap, Heightmap};
+use crate::hydrology::{generate_hydrology, Hydrology};
 use crate::tectonics::{generate_tectonics, TectonicMap};
 
 /// A generated world: the config it came from plus every stage's output.
@@ -29,6 +30,8 @@ pub struct World {
     pub terrain: Heightmap,
     /// Stage: temperature, wind and precipitation.
     pub climate: Climate,
+    /// Stage: lakes, drainage and river networks.
+    pub hydrology: Hydrology,
     /// Work queued by `set_config` and not yet done by `advance`.
     pending: Pending,
 }
@@ -37,6 +40,7 @@ pub struct World {
 struct Pending {
     erosion: Option<ErosionJob>,
     climate: bool,
+    hydrology: bool,
 }
 
 /// Which stages a config change re-ran or queued.
@@ -47,6 +51,7 @@ pub struct StagesRun {
     pub heightmap: bool,
     pub erosion: bool,
     pub climate: bool,
+    pub hydrology: bool,
 }
 
 impl World {
@@ -56,6 +61,7 @@ impl World {
         let heightmap = blend_heightmap(config, &tectonics, &noise);
         let terrain = erode(config, &heightmap);
         let climate = generate_climate(config, &terrain);
+        let hydrology = generate_hydrology(config, &terrain, &climate);
         Self {
             config: config.clone(),
             tectonics,
@@ -63,6 +69,7 @@ impl World {
             heightmap,
             terrain,
             climate,
+            hydrology,
             pending: Pending::default(),
         }
     }
@@ -93,12 +100,14 @@ impl World {
             || self.pending.erosion.is_some()
             || config.terrain != old.terrain
             || config.climate != old.climate;
+        let hydrology = climate || config.hydrology != old.hydrology;
         let run = StagesRun {
             tectonics,
             noise,
             heightmap,
             erosion,
             climate,
+            hydrology,
         };
 
         if tectonics {
@@ -114,6 +123,7 @@ impl World {
             self.pending.erosion = Some(ErosionJob::new(config, &self.heightmap));
         }
         self.pending.climate |= climate;
+        self.pending.hydrology |= hydrology;
         self.config = config.clone();
         // Without erosion to wait for, the rest is quick: do it now.
         if self.pending.erosion.is_none() {
@@ -138,6 +148,11 @@ impl World {
         if self.pending.climate {
             self.climate = generate_climate(&self.config, &self.terrain);
             self.pending.climate = false;
+            self.pending.hydrology = true;
+        }
+        if self.pending.hydrology {
+            self.hydrology = generate_hydrology(&self.config, &self.terrain, &self.climate);
+            self.pending.hydrology = false;
         }
         true
     }
@@ -225,6 +240,7 @@ mod tests {
                 r.heightmap = true;
                 r.erosion = true;
                 r.climate = true;
+                r.hydrology = true;
             })
         );
         assert_eq!(world, World::generate(&config));
@@ -241,13 +257,24 @@ mod tests {
             only(|r| {
                 r.erosion = true;
                 r.climate = true;
+                r.hydrology = true;
             })
         );
         assert_eq!(world, World::generate(&config));
     }
 
     #[test]
-    fn changing_sea_level_or_temperature_reruns_only_climate() {
+    fn changing_river_threshold_reruns_only_hydrology() {
+        let mut world = World::generate(&small(42));
+        let mut config = small(42);
+        config.hydrology.river_threshold = 20.0;
+        assert_eq!(world.set_config(&config), only(|r| r.hydrology = true));
+        assert!(world.is_ready());
+        assert_eq!(world, World::generate(&config));
+    }
+
+    #[test]
+    fn changing_sea_level_or_temperature_skips_terrain() {
         for change in [
             (|c: &mut WorldConfig| c.terrain.sea_level = 0.6) as fn(&mut WorldConfig),
             |c| c.climate.global_temperature_offset = -8.0,
@@ -255,7 +282,13 @@ mod tests {
             let mut world = World::generate(&small(42));
             let mut config = small(42);
             change(&mut config);
-            assert_eq!(world.set_config(&config), only(|r| r.climate = true));
+            assert_eq!(
+                world.set_config(&config),
+                only(|r| {
+                    r.climate = true;
+                    r.hydrology = true;
+                })
+            );
             assert!(world.is_ready(), "climate-only changes finish immediately");
             assert_eq!(world, World::generate(&config));
         }

@@ -1,7 +1,8 @@
 use eframe::egui::{self, Color32, ColorImage, Rect, Stroke, TextureHandle, TextureOptions};
 use worldgen_core::{
     BoundaryKind, Heightmap, PlateKind, World, WorldConfig, MAX_DROPLETS, MAX_PLATES,
-    MAX_TEMPERATURE_OFFSET, MIN_PLATES, MIN_TEMPERATURE_OFFSET,
+    MAX_RIVER_THRESHOLD, MAX_TEMPERATURE_OFFSET, MIN_PLATES, MIN_RIVER_THRESHOLD,
+    MIN_TEMPERATURE_OFFSET,
 };
 
 /// Erosion rounds (4096 droplets each) to run per frame while erosion is in
@@ -37,10 +38,12 @@ enum DebugView {
     Precipitation,
     /// Climate stage: prevailing winds.
     Wind,
+    /// Hydrology stage: flow accumulation, lakes and rivers.
+    Drainage,
 }
 
 impl DebugView {
-    const ALL: [DebugView; 9] = [
+    const ALL: [DebugView; 10] = [
         DebugView::Terrain,
         DebugView::Plates,
         DebugView::TectonicRelief,
@@ -50,6 +53,7 @@ impl DebugView {
         DebugView::Temperature,
         DebugView::Precipitation,
         DebugView::Wind,
+        DebugView::Drainage,
     ];
 
     fn label(self) -> &'static str {
@@ -63,6 +67,7 @@ impl DebugView {
             DebugView::Temperature => "Temperature",
             DebugView::Precipitation => "Precipitation",
             DebugView::Wind => "Prevailing winds",
+            DebugView::Drainage => "Drainage (flow accumulation)",
         }
     }
 }
@@ -148,7 +153,8 @@ impl WorldGenApp {
         let sea = self.world.config.terrain.sea_level;
         let (map, climate) = (&self.world.terrain, &self.world.climate);
         match self.view {
-            DebugView::Terrain => render::hypsometric(self.shown_terrain(), sea),
+            DebugView::Terrain if self.before_erosion => render::hypsometric(&self.world.heightmap, sea),
+            DebugView::Terrain => render::terrain_with_lakes(map, &self.world.hydrology, sea),
             DebugView::Plates => render::plates(&self.world.tectonics),
             DebugView::TectonicRelief => {
                 render::stretched_greyscale(w, h, &self.world.tectonics.elevation)
@@ -163,6 +169,7 @@ impl WorldGenApp {
             DebugView::Temperature => render::temperature(climate, map, sea),
             DebugView::Precipitation => render::precipitation(climate, map, sea),
             DebugView::Wind => render::wind_background(map, sea),
+            DebugView::Drainage => render::flow_accumulation(map, &self.world.hydrology, sea),
         }
     }
 
@@ -248,6 +255,20 @@ impl WorldGenApp {
         ui.add_space(6.0);
         self.erosion_controls(ui);
 
+        ui.add_space(6.0);
+        ui.label("River threshold");
+        let rivers = ui.add(
+            egui::Slider::new(
+                &mut self.config.hydrology.river_threshold,
+                MIN_RIVER_THRESHOLD..=MAX_RIVER_THRESHOLD,
+            )
+            .logarithmic(true)
+            .fixed_decimals(0),
+        );
+        if rivers.changed() {
+            self.apply_config();
+        }
+
         ui.add_space(12.0);
         ui.separator();
         ui.label("Debug view");
@@ -301,6 +322,14 @@ impl WorldGenApp {
             }
             DebugView::Wind => {
                 ui.weak("Easterly trades 0-30°, westerlies 30-60°, polar easterlies 60-90°.");
+            }
+            DebugView::Terrain | DebugView::Drainage if !self.before_erosion => {
+                let hy = &self.world.hydrology;
+                legend_row(ui, render::RIVER, &format!("Rivers: {} ({} segments)", hy.rivers.len(), hy.segments.len()));
+                legend_row(ui, render::LAKE, &format!("Lakes: {}", hy.lakes.len()));
+                if let Some(longest) = hy.rivers.iter().max_by(|a, b| a.discharge.total_cmp(&b.discharge)) {
+                    ui.weak(format!("Largest river discharge: {:.0}", longest.discharge));
+                }
             }
             _ => {}
         }
@@ -385,6 +414,9 @@ impl WorldGenApp {
             match self.view {
                 DebugView::Plates => self.draw_drift_arrows(ui.painter(), rect),
                 DebugView::Wind => self.draw_wind_arrows(ui.painter(), rect),
+                DebugView::Terrain | DebugView::Drainage if !self.before_erosion => {
+                    self.draw_rivers(ui.painter(), rect)
+                }
                 _ => {}
             }
             if self.before_erosion && matches!(self.view, DebugView::Terrain | DebugView::Heightmap) {
@@ -413,6 +445,27 @@ impl WorldGenApp {
 }
 
 impl WorldGenApp {
+    /// Rivers from the hydrology polylines, wider with more discharge.
+    fn draw_rivers(&self, painter: &egui::Painter, rect: Rect) {
+        let hy = &self.world.hydrology;
+        if hy.width == 0 {
+            return;
+        }
+        let scale = rect.width() / hy.width as f32;
+        let threshold = self.world.config.hydrology.river_threshold.max(1e-3);
+        let colour = Color32::from_rgb(render::RIVER[0], render::RIVER[1], render::RIVER[2]);
+        let to_screen = |p: [f32; 2]| rect.min + egui::vec2(p[0], p[1]) * scale;
+        for segment in &hy.segments {
+            for (pair, q) in segment.points.windows(2).zip(&segment.discharge[1..]) {
+                let width = (0.35 + 0.45 * (q / threshold).sqrt()).min(3.5) * scale;
+                painter.line_segment(
+                    [to_screen(pair[0]), to_screen(pair[1])],
+                    Stroke::new(width.max(0.8), colour),
+                );
+            }
+        }
+    }
+
     fn draw_wind_arrows(&self, painter: &egui::Painter, rect: Rect) {
         let c = &self.world.climate;
         if c.width == 0 || c.height == 0 {
