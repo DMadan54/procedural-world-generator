@@ -21,6 +21,7 @@ mod field;
 pub mod fractal;
 pub mod heightmap;
 pub mod hydrology;
+pub mod names;
 pub mod rng;
 pub mod share;
 pub mod tectonics;

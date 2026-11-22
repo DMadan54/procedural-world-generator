@@ -21,6 +21,10 @@ pub mod stage {
     pub const CLIMATE: &str = "climate";
     pub const EROSION: &str = "erosion";
     pub const BIOMES: &str = "biomes";
+    pub const LANGUAGE: &str = "language";
+    pub const NAMES_PEOPLE: &str = "names.people";
+    pub const NAMES_PLACE: &str = "names.place";
+    pub const NAMES_PERSON: &str = "names.person";
 }
 
 const DOMAIN_STAGE: u64 = 0x5354_4147_4521_0001;
