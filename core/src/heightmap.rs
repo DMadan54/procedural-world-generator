@@ -1,37 +1,7 @@
-//! Stage 1: fractal (FBM) noise heightmap.
+//! Stage: final heightmap, blending tectonic relief with fractal noise.
 
-use noise::{Fbm, MultiFractal, NoiseFn, Perlin};
-use rand_chacha::rand_core::RngCore;
-
-use crate::rng::{Stage, WorldSeed};
-
-/// Parameters for heightmap generation.
-#[derive(Clone, Debug, PartialEq)]
-pub struct HeightmapParams {
-    pub width: usize,
-    pub height: usize,
-    /// Number of noise layers summed together.
-    pub octaves: usize,
-    /// Base frequency, in noise cycles per map width.
-    pub frequency: f64,
-    /// Frequency multiplier between octaves.
-    pub lacunarity: f64,
-    /// Amplitude multiplier between octaves.
-    pub persistence: f64,
-}
-
-impl Default for HeightmapParams {
-    fn default() -> Self {
-        Self {
-            width: 512,
-            height: 512,
-            octaves: 6,
-            frequency: 4.0,
-            lacunarity: 2.0,
-            persistence: 0.5,
-        }
-    }
-}
+use crate::config::WorldConfig;
+use crate::tectonics::TectonicMap;
 
 /// A grid of heights, row-major, each normalised to `0.0..=1.0`.
 #[derive(Clone, Debug, PartialEq)]
@@ -47,49 +17,30 @@ impl Heightmap {
     }
 }
 
-/// Generates a heightmap. The same seed and params always give the same result.
-pub fn generate_heightmap(seed: WorldSeed, params: &HeightmapParams) -> Heightmap {
-    let mut rng = seed.stage_rng(Stage::Heightmap);
-
-    let noise_seed = rng.next_u32();
-    // A random offset into noise space, so nearby seeds don't share structure
-    // around the origin.
-    let offset_x = unit_f64(&mut rng) * 10_000.0;
-    let offset_y = unit_f64(&mut rng) * 10_000.0;
-
-    let fbm = Fbm::<Perlin>::new(noise_seed)
-        .set_octaves(params.octaves)
-        .set_frequency(params.frequency)
-        .set_lacunarity(params.lacunarity)
-        .set_persistence(params.persistence);
-
-    // Sample in units of "map widths" so the frequency is resolution-independent.
-    let scale = 1.0 / params.width.max(1) as f64;
-    let mut data = Vec::with_capacity(params.width * params.height);
-    for y in 0..params.height {
-        for x in 0..params.width {
-            let nx = offset_x + x as f64 * scale;
-            let ny = offset_y + y as f64 * scale;
-            data.push(fbm.get([nx, ny]) as f32);
-        }
-    }
-
+/// Adds weighted tectonic relief and noise, then normalises to `0.0..=1.0`.
+pub fn blend_heightmap(config: &WorldConfig, tectonics: &TectonicMap, noise: &[f32]) -> Heightmap {
+    let params = &config.blend;
+    assert_eq!(
+        tectonics.elevation.len(),
+        noise.len(),
+        "tectonic and noise fields must be the same size"
+    );
+    let mut data: Vec<f32> = tectonics
+        .elevation
+        .iter()
+        .zip(noise)
+        .map(|(&t, &n)| params.tectonic_weight * t + params.noise_weight * n)
+        .collect();
     normalise(&mut data);
     Heightmap {
-        width: params.width,
-        height: params.height,
+        width: tectonics.width,
+        height: tectonics.height,
         data,
     }
 }
 
-/// A uniform value in `0.0..1.0`.
-fn unit_f64(rng: &mut impl RngCore) -> f64 {
-    // Top 53 bits, the precision of an f64 mantissa.
-    (rng.next_u64() >> 11) as f64 / (1u64 << 53) as f64
-}
-
 /// Rescales values to span exactly `0.0..=1.0`.
-fn normalise(data: &mut [f32]) {
+pub(crate) fn normalise(data: &mut [f32]) {
     let (min, max) = data
         .iter()
         .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| (lo.min(v), hi.max(v)));
@@ -105,43 +56,17 @@ fn normalise(data: &mut [f32]) {
 mod tests {
     use super::*;
 
-    fn small() -> HeightmapParams {
-        HeightmapParams {
-            width: 64,
-            height: 48,
-            ..Default::default()
-        }
+    #[test]
+    fn normalise_spans_zero_to_one() {
+        let mut v = vec![-3.0, 1.0, 5.0];
+        normalise(&mut v);
+        assert_eq!(v, vec![0.0, 0.5, 1.0]);
     }
 
     #[test]
-    fn same_seed_and_params_are_identical() {
-        let a = generate_heightmap(WorldSeed(42), &small());
-        let b = generate_heightmap(WorldSeed(42), &small());
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn different_seeds_differ() {
-        let a = generate_heightmap(WorldSeed(42), &small());
-        let b = generate_heightmap(WorldSeed(43), &small());
-        assert_ne!(a.data, b.data);
-    }
-
-    #[test]
-    fn dimensions_match_params() {
-        let map = generate_heightmap(WorldSeed(1), &small());
-        assert_eq!(map.width, 64);
-        assert_eq!(map.height, 48);
-        assert_eq!(map.data.len(), 64 * 48);
-    }
-
-    #[test]
-    fn values_are_normalised() {
-        let map = generate_heightmap(WorldSeed(9), &small());
-        assert!(map.data.iter().all(|v| (0.0..=1.0).contains(v)));
-        let min = map.data.iter().cloned().fold(f32::INFINITY, f32::min);
-        let max = map.data.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        assert_eq!(min, 0.0);
-        assert_eq!(max, 1.0);
+    fn normalise_flat_field_is_zero() {
+        let mut v = vec![2.0; 4];
+        normalise(&mut v);
+        assert_eq!(v, vec![0.0; 4]);
     }
 }

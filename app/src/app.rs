@@ -1,37 +1,51 @@
-use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
-use worldgen_core::{generate_heightmap, Heightmap, HeightmapParams, WorldSeed};
+use eframe::egui::{self, Color32, ColorImage, Rect, Stroke, TextureHandle, TextureOptions};
+use worldgen_core::{BoundaryKind, PlateKind, World, WorldConfig, MAX_PLATES, MIN_PLATES};
 
-use crate::render;
+use crate::render::{self, Rgb};
 
-const DEFAULT_SEED: u64 = 42;
 const DEFAULT_SEA_LEVEL: f32 = 0.45;
 
 /// What the central panel shows. Every pipeline stage gets an entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DebugView {
-    /// Heightmap coloured by elevation relative to sea level.
+    /// Final heightmap coloured by elevation relative to sea level.
     Terrain,
-    /// Raw heightmap stage output in greyscale.
+    /// Tectonics stage: plate regions, boundary types and drift.
+    Plates,
+    /// Tectonics stage: the relief it contributes.
+    TectonicRelief,
+    /// Noise stage: raw fractal noise.
+    Noise,
+    /// Final heightmap in greyscale.
     Heightmap,
 }
 
 impl DebugView {
-    const ALL: [DebugView; 2] = [DebugView::Terrain, DebugView::Heightmap];
+    const ALL: [DebugView; 5] = [
+        DebugView::Terrain,
+        DebugView::Plates,
+        DebugView::TectonicRelief,
+        DebugView::Noise,
+        DebugView::Heightmap,
+    ];
 
     fn label(self) -> &'static str {
         match self {
             DebugView::Terrain => "Terrain",
+            DebugView::Plates => "Tectonic plates",
+            DebugView::TectonicRelief => "Tectonic relief",
+            DebugView::Noise => "Fractal noise",
             DebugView::Heightmap => "Heightmap (greyscale)",
         }
     }
 }
 
 pub struct WorldGenApp {
+    /// What the controls are editing; applied to `world` via `World::update`.
+    config: WorldConfig,
+    world: World,
     seed_text: String,
     seed_error: Option<String>,
-    seed: WorldSeed,
-    params: HeightmapParams,
-    heightmap: Heightmap,
     /// Display only: changing it recolours the existing heightmap.
     sea_level: f32,
     view: DebugView,
@@ -42,15 +56,13 @@ pub struct WorldGenApp {
 
 impl WorldGenApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let seed = WorldSeed(DEFAULT_SEED);
-        let params = HeightmapParams::default();
-        let heightmap = generate_heightmap(seed, &params);
+        let config = WorldConfig::default();
+        let world = World::generate(&config);
         Self {
-            seed_text: DEFAULT_SEED.to_string(),
+            seed_text: config.seed.to_string(),
+            config,
+            world,
             seed_error: None,
-            seed,
-            params,
-            heightmap,
             sea_level: DEFAULT_SEA_LEVEL,
             view: DebugView::Terrain,
             texture: None,
@@ -58,13 +70,20 @@ impl WorldGenApp {
         }
     }
 
+    /// Brings the world up to date with `config`, re-running only what changed.
+    fn apply_config(&mut self) {
+        let run = self.world.update(&self.config);
+        if run != Default::default() {
+            self.texture_dirty = true;
+        }
+    }
+
     fn regenerate(&mut self) {
         match self.seed_text.trim().parse::<u64>() {
-            Ok(value) => {
+            Ok(seed) => {
                 self.seed_error = None;
-                self.seed = WorldSeed(value);
-                self.heightmap = generate_heightmap(self.seed, &self.params);
-                self.texture_dirty = true;
+                self.config.seed = seed;
+                self.apply_config();
             }
             Err(_) => {
                 self.seed_error = Some(format!(
@@ -76,77 +95,114 @@ impl WorldGenApp {
     }
 
     fn render_view(&self) -> ColorImage {
+        let (w, h) = (self.world.config.width, self.world.config.height);
         match self.view {
-            DebugView::Terrain => render::hypsometric(&self.heightmap, self.sea_level),
-            DebugView::Heightmap => render::greyscale(&self.heightmap),
+            DebugView::Terrain => render::hypsometric(&self.world.heightmap, self.sea_level),
+            DebugView::Plates => render::plates(&self.world.tectonics),
+            DebugView::TectonicRelief => {
+                render::stretched_greyscale(w, h, &self.world.tectonics.elevation)
+            }
+            DebugView::Noise => render::stretched_greyscale(w, h, &self.world.noise),
+            DebugView::Heightmap => render::greyscale(&self.world.heightmap),
         }
     }
 
     fn side_panel(&mut self, ctx: &egui::Context) {
         egui::SidePanel::left("controls")
             .resizable(false)
-            .exact_width(220.0)
+            .exact_width(230.0)
             .show(ctx, |ui| {
-                ui.add_space(8.0);
-                ui.heading("World");
-                ui.add_space(8.0);
-
-                ui.label("Seed");
-                let field = ui.add(
-                    egui::TextEdit::singleline(&mut self.seed_text)
-                        .desired_width(f32::INFINITY)
-                        .hint_text("e.g. 42"),
-                );
-                let pressed_enter =
-                    field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if let Some(error) = &self.seed_error {
-                    ui.colored_label(ui.visuals().error_fg_color, error);
-                }
-
-                ui.add_space(4.0);
-                let clicked = ui
-                    .add_sized([ui.available_width(), 28.0], egui::Button::new("Regenerate"))
-                    .clicked();
-                if clicked || pressed_enter {
-                    self.regenerate();
-                }
-
-                ui.add_space(16.0);
-                ui.separator();
-                ui.label("Sea level");
-                ui.spacing_mut().slider_width = ui.available_width() - 56.0;
-                let sea = ui.add(
-                    egui::Slider::new(&mut self.sea_level, 0.0..=1.0)
-                        .fixed_decimals(2)
-                        .step_by(0.01),
-                );
-                if sea.changed() && self.view == DebugView::Terrain {
-                    self.texture_dirty = true;
-                }
-
-                ui.add_space(16.0);
-                ui.separator();
-                ui.label("Debug view");
-                let before = self.view;
-                egui::ComboBox::from_id_salt("debug_view")
-                    .width(ui.available_width())
-                    .selected_text(self.view.label())
-                    .show_ui(ui, |ui| {
-                        for view in DebugView::ALL {
-                            ui.selectable_value(&mut self.view, view, view.label());
-                        }
-                    });
-                if self.view != before {
-                    self.texture_dirty = true;
-                }
-
-                ui.add_space(16.0);
-                ui.separator();
-                ui.weak(format!(
-                    "Showing seed {} at {}×{}",
-                    self.seed.0, self.heightmap.width, self.heightmap.height
-                ));
+                egui::ScrollArea::vertical().show(ui, |ui| self.controls(ui));
             });
+    }
+
+    fn controls(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(8.0);
+        ui.heading("World");
+        ui.add_space(8.0);
+
+        ui.label("Seed");
+        let field = ui.add(
+            egui::TextEdit::singleline(&mut self.seed_text)
+                .desired_width(f32::INFINITY)
+                .hint_text("e.g. 42"),
+        );
+        let pressed_enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if let Some(error) = &self.seed_error {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+        }
+        ui.add_space(4.0);
+        let clicked = ui
+            .add_sized([ui.available_width(), 28.0], egui::Button::new("Regenerate"))
+            .clicked();
+        if clicked || pressed_enter {
+            self.regenerate();
+        }
+
+        ui.add_space(12.0);
+        ui.separator();
+        ui.spacing_mut().slider_width = ui.available_width() - 56.0;
+
+        ui.label("Tectonic plates");
+        let plates = ui.add(egui::Slider::new(
+            &mut self.config.tectonics.plate_count,
+            MIN_PLATES..=MAX_PLATES,
+        ));
+        if plates.changed() {
+            self.apply_config();
+        }
+
+        ui.add_space(6.0);
+        ui.label("Sea level");
+        let sea = ui.add(
+            egui::Slider::new(&mut self.sea_level, 0.0..=1.0)
+                .fixed_decimals(2)
+                .step_by(0.01),
+        );
+        if sea.changed() && self.view == DebugView::Terrain {
+            self.texture_dirty = true;
+        }
+
+        ui.add_space(12.0);
+        ui.separator();
+        ui.label("Debug view");
+        let before = self.view;
+        egui::ComboBox::from_id_salt("debug_view")
+            .width(ui.available_width())
+            .selected_text(self.view.label())
+            .show_ui(ui, |ui| {
+                for view in DebugView::ALL {
+                    ui.selectable_value(&mut self.view, view, view.label());
+                }
+            });
+        if self.view != before {
+            self.texture_dirty = true;
+        }
+
+        if self.view == DebugView::Plates {
+            ui.add_space(8.0);
+            self.plate_legend(ui);
+        }
+
+        ui.add_space(12.0);
+        ui.separator();
+        ui.weak(format!(
+            "Seed {} at {}×{}",
+            self.world.config.seed, self.world.config.width, self.world.config.height
+        ));
+    }
+
+    fn plate_legend(&self, ui: &mut egui::Ui) {
+        let t = &self.world.tectonics;
+        let count = |kind| t.boundaries.iter().filter(|b| b.kind == kind).count();
+        let continental = t.plates.iter().filter(|p| p.kind == PlateKind::Continental).count();
+
+        legend_row(ui, render::plate_colour(1, PlateKind::Continental), &format!("Continental plates: {continental}"));
+        legend_row(ui, render::plate_colour(1, PlateKind::Oceanic), &format!("Oceanic plates: {}", t.plates.len() - continental));
+        legend_row(ui, render::CONVERGENT, &format!("Convergent: {}", count(BoundaryKind::Convergent)));
+        legend_row(ui, render::DIVERGENT, &format!("Divergent: {}", count(BoundaryKind::Divergent)));
+        legend_row(ui, render::TRANSFORM, &format!("Transform: {}", count(BoundaryKind::Transform)));
+        ui.weak("Arrows show each plate's drift.");
     }
 
     /// Redraws the image if needed, reusing the GPU texture when it exists.
@@ -169,16 +225,45 @@ impl WorldGenApp {
         let texture = self.texture.as_ref().expect("texture was just created");
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            let available = ui.available_size();
+            let panel = ui.available_rect_before_wrap();
             let [w, h] = texture.size().map(|v| v as f32);
             // Fit the whole image in the panel, keeping its aspect ratio.
-            let scale = (available.x / w).min(available.y / h);
-            let size = egui::vec2(w * scale, h * scale);
-            ui.centered_and_justified(|ui| {
-                ui.add(egui::Image::new(texture).fit_to_exact_size(size));
-            });
+            let scale = (panel.width() / w).min(panel.height() / h);
+            let rect = Rect::from_center_size(panel.center(), egui::vec2(w * scale, h * scale));
+            egui::Image::new(texture).paint_at(ui, rect);
+
+            if self.view == DebugView::Plates {
+                self.draw_drift_arrows(ui.painter(), rect);
+            }
         });
     }
+
+    fn draw_drift_arrows(&self, painter: &egui::Painter, rect: Rect) {
+        let t = &self.world.tectonics;
+        let to_screen = |p: [f32; 2]| {
+            rect.min + egui::vec2(p[0] / t.width as f32 * rect.width(), p[1] / t.height as f32 * rect.height())
+        };
+        let length = rect.width() * 0.07;
+        for plate in &t.plates {
+            let origin = to_screen(plate.centre);
+            let arrow = egui::vec2(plate.drift[0], plate.drift[1]) * length;
+            painter.arrow(origin, arrow, Stroke::new(4.0_f32, Color32::from_black_alpha(170)));
+            painter.arrow(origin, arrow, Stroke::new(2.0_f32, Color32::WHITE));
+            painter.circle_filled(origin, 3.5_f32, Color32::WHITE);
+            painter.circle_stroke(origin, 3.5_f32, Stroke::new(1.0_f32, Color32::BLACK));
+        }
+    }
+}
+
+fn legend_row(ui: &mut egui::Ui, colour: Rgb, label: &str) {
+    ui.horizontal(|ui| {
+        let (swatch, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+        ui.painter()
+            .rect_filled(swatch, 2.0_f32, Color32::from_rgb(colour[0], colour[1], colour[2]));
+        ui.painter()
+            .rect_stroke(swatch, 2.0_f32, Stroke::new(1.0_f32, Color32::GRAY), egui::StrokeKind::Inside);
+        ui.label(label);
+    });
 }
 
 impl eframe::App for WorldGenApp {
