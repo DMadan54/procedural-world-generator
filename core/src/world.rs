@@ -1,12 +1,13 @@
 //! The generation pipeline: runs each stage in order from one [`WorldConfig`].
 //!
 //! Stages: tectonics and noise (independent) → blended heightmap → erosion →
-//! climate → hydrology. Erosion can take seconds, so besides the blocking
+//! climate → hydrology → biomes. Erosion can take seconds, so besides the blocking
 //! [`World::generate`] and [`World::update`] there is an incremental path:
 //! [`World::set_config`] runs the cheap stages straight away and queues
 //! erosion and everything after it, and [`World::advance`] does the queued
 //! work a little at a time. Both paths give identical worlds.
 
+use crate::biome::{generate_biomes, Biomes};
 use crate::climate::{generate_climate, Climate};
 use crate::config::WorldConfig;
 use crate::erosion::{erode, ErosionJob};
@@ -32,6 +33,8 @@ pub struct World {
     pub climate: Climate,
     /// Stage: lakes, drainage and river networks.
     pub hydrology: Hydrology,
+    /// Stage: biome per cell.
+    pub biomes: Biomes,
     /// Work queued by `set_config` and not yet done by `advance`.
     pending: Pending,
 }
@@ -41,6 +44,7 @@ struct Pending {
     erosion: Option<ErosionJob>,
     climate: bool,
     hydrology: bool,
+    biomes: bool,
 }
 
 /// Which stages a config change re-ran or queued.
@@ -52,6 +56,7 @@ pub struct StagesRun {
     pub erosion: bool,
     pub climate: bool,
     pub hydrology: bool,
+    pub biomes: bool,
 }
 
 impl World {
@@ -62,6 +67,7 @@ impl World {
         let terrain = erode(config, &heightmap);
         let climate = generate_climate(config, &terrain);
         let hydrology = generate_hydrology(config, &terrain, &climate);
+        let biomes = generate_biomes(config, &terrain, &climate, &hydrology);
         Self {
             config: config.clone(),
             tectonics,
@@ -70,6 +76,7 @@ impl World {
             terrain,
             climate,
             hydrology,
+            biomes,
             pending: Pending::default(),
         }
     }
@@ -101,6 +108,8 @@ impl World {
             || config.terrain != old.terrain
             || config.climate != old.climate;
         let hydrology = climate || config.hydrology != old.hydrology;
+        // Biomes read the climate, terrain and lakes, so they follow hydrology.
+        let biomes = hydrology;
         let run = StagesRun {
             tectonics,
             noise,
@@ -108,6 +117,7 @@ impl World {
             erosion,
             climate,
             hydrology,
+            biomes,
         };
 
         if tectonics {
@@ -124,6 +134,7 @@ impl World {
         }
         self.pending.climate |= climate;
         self.pending.hydrology |= hydrology;
+        self.pending.biomes |= biomes;
         self.config = config.clone();
         // Without erosion to wait for, the rest is quick: do it now.
         if self.pending.erosion.is_none() {
@@ -153,6 +164,12 @@ impl World {
         if self.pending.hydrology {
             self.hydrology = generate_hydrology(&self.config, &self.terrain, &self.climate);
             self.pending.hydrology = false;
+            self.pending.biomes = true;
+        }
+        if self.pending.biomes {
+            self.biomes =
+                generate_biomes(&self.config, &self.terrain, &self.climate, &self.hydrology);
+            self.pending.biomes = false;
         }
         true
     }
@@ -241,6 +258,7 @@ mod tests {
                 r.erosion = true;
                 r.climate = true;
                 r.hydrology = true;
+                r.biomes = true;
             })
         );
         assert_eq!(world, World::generate(&config));
@@ -258,6 +276,7 @@ mod tests {
                 r.erosion = true;
                 r.climate = true;
                 r.hydrology = true;
+                r.biomes = true;
             })
         );
         assert_eq!(world, World::generate(&config));
@@ -268,7 +287,13 @@ mod tests {
         let mut world = World::generate(&small(42));
         let mut config = small(42);
         config.hydrology.river_threshold = 20.0;
-        assert_eq!(world.set_config(&config), only(|r| r.hydrology = true));
+        assert_eq!(
+            world.set_config(&config),
+            only(|r| {
+                r.hydrology = true;
+                r.biomes = true;
+            })
+        );
         assert!(world.is_ready());
         assert_eq!(world, World::generate(&config));
     }
@@ -287,6 +312,7 @@ mod tests {
                 only(|r| {
                     r.climate = true;
                     r.hydrology = true;
+                r.biomes = true;
                 })
             );
             assert!(world.is_ready(), "climate-only changes finish immediately");

@@ -11,8 +11,9 @@
 //! changes an earlier one.
 //!
 //! Pipeline: tectonics and noise (independent) → blended heightmap → erosion
-//! → climate → hydrology.
+//! → climate → hydrology → biomes.
 
+pub mod biome;
 pub mod climate;
 pub mod config;
 pub mod erosion;
@@ -24,6 +25,7 @@ pub mod rng;
 pub mod tectonics;
 pub mod world;
 
+pub use biome::{Biome, Biomes};
 pub use climate::Climate;
 pub use config::{
     WorldConfig, GENERATOR_VERSION, MAX_DROPLETS, MAX_PLATES, MAX_RIVER_THRESHOLD,
