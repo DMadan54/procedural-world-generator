@@ -16,7 +16,8 @@ browser.
 - **Physically motivated pipeline.** Plates collide to raise mountains, rain
   falls on windward slopes, rivers carve their way to the sea.
 - **Antique map style.** Parchment, hatched coastlines, inked rivers that
-  taper with flow, mountain glyphs along ranges, and stippled forests.
+  taper with flow, mountain glyphs along ranges, stippled forests and marsh
+  tufts.
 - **World setup.** Choose a layout (continents, archipelago, pangaea,
   islands), sea level, mountain density, climate band, world size, and story
   settings for magic, politics, disasters and history. Start from one of four
@@ -39,7 +40,7 @@ Each stage reads the outputs of the ones before it and has its own debug view.
 | Erosion | Simulates water droplets that carve valleys and deposit sediment. Runs in the background with a progress bar; parallel on desktop. | Erosion change, before/after toggle |
 | Climate | Temperature from latitude and altitude; prevailing winds in three bands; rain carried downwind and dropped on slopes, leaving rain shadows behind ranges. | Temperature, Precipitation, Prevailing winds |
 | Hydrology | Fills depressions into lakes, routes water downhill and traces rivers as connected polylines with discharge, ready for later stages to query. | Drainage |
-| Biomes | Classifies each cell from its climate and elevation: ice, tundra, alpine, forests, grassland, desert, savanna and more. | Biomes |
+| Biomes | Classifies each cell from its climate and elevation (ice, tundra, alpine, forests, grassland, desert, savanna and more) with noise-ragged borders, adds wetlands and mangroves on flat wet ground, and smooths away speckle. | Biomes, with coverage and a Whittaker diagram |
 
 The magic, politics, disasters and history settings are saved with each world
 and travel in share links, but no stage uses them yet.

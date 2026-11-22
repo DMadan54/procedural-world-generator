@@ -109,7 +109,7 @@ impl World {
             || config.climate != old.climate;
         let hydrology = climate || config.hydrology != old.hydrology;
         // Biomes read the climate, terrain and lakes, so they follow hydrology.
-        let biomes = hydrology;
+        let biomes = hydrology || config.biomes != old.biomes;
         let run = StagesRun {
             tectonics,
             noise,
@@ -294,6 +294,16 @@ mod tests {
                 r.biomes = true;
             })
         );
+        assert_eq!(world, World::generate(&config));
+    }
+
+    #[test]
+    fn changing_biome_settings_reruns_only_biomes() {
+        let mut world = World::generate(&small(42));
+        let mut config = small(42);
+        config.biomes.edge_jitter_c = 5.0;
+        assert_eq!(world.set_config(&config), only(|r| r.biomes = true));
+        assert!(world.is_ready());
         assert_eq!(world, World::generate(&config));
     }
 

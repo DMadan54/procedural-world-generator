@@ -36,6 +36,8 @@ fn land_tint(biome: Biome) -> Colour {
         Biome::Savanna => [0.93, 0.85, 0.64],
         Biome::TropicalForest => [0.82, 0.83, 0.63],
         Biome::TropicalRainforest => [0.77, 0.81, 0.62],
+        Biome::Wetland => [0.80, 0.83, 0.71],
+        Biome::Mangrove => [0.75, 0.80, 0.67],
         Biome::Ocean | Biome::Lake => WATER,
     }
 }
@@ -54,6 +56,11 @@ impl Default for AntiqueStyle {
 
 /// Something drawn on top of the land, painted back to front.
 enum Glyph {
+    /// Marsh tufts over water lines; mangroves get a canopy on arched roots.
+    Marsh {
+        at: [f32; 2],
+        mangrove: bool,
+    },
     Mountain {
         base: [f32; 2],
         dir: [f32; 2],
@@ -77,7 +84,7 @@ impl Glyph {
     fn depth(&self) -> f32 {
         match self {
             Glyph::Mountain { base, .. } | Glyph::Hill { base, .. } => base[1],
-            Glyph::Tree { at, .. } => at[1],
+            Glyph::Tree { at, .. } | Glyph::Marsh { at, .. } => at[1],
         }
     }
 }
@@ -216,6 +223,7 @@ impl MapStyle for AntiqueStyle {
         let mut glyphs = Vec::new();
         self.place_relief(world, s, &tint_at, &mut glyphs);
         self.place_forests(world, s, &mut canvas, &mut glyphs);
+        self.place_marshes(world, s, &mut glyphs);
         glyphs.sort_by(|a, b| a.depth().total_cmp(&b.depth()));
         for glyph in &glyphs {
             draw_glyph(&mut canvas, glyph, s);
@@ -292,6 +300,32 @@ impl AntiqueStyle {
                     half_width: height * (0.75 + 0.3 * hash(gx, gy, 14)),
                     skew: (hash(gx, gy, 15) - 0.5) * 0.5,
                     tint: tint_at(x, y),
+                });
+            }
+        }
+    }
+
+    /// Marsh glyphs on wetland cells. Wetlands are often thin rings around
+    /// lakes, so they're sampled per cell rather than on the coarser forest grid.
+    fn place_marshes(&self, world: &World, s: f32, out: &mut Vec<Glyph>) {
+        let (mw, mh) = (world.terrain.width, world.terrain.height);
+        for y in 0..mh {
+            for x in 0..mw {
+                let i = y * mw + x;
+                let biome = world.biomes.biome[i];
+                // Keep clear of river lines; a third of cells keeps it airy.
+                if !biome.is_wetland() || world.hydrology.segment_id[i] != NO_SEGMENT {
+                    continue;
+                }
+                let (xi, yi) = (x as i32, y as i32);
+                if hash(xi, yi, 26) > 0.35 {
+                    continue;
+                }
+                let jx = x as f32 + 0.5 + (hash(xi, yi, 27) - 0.5) * 0.8;
+                let jy = y as f32 + 0.5 + (hash(xi, yi, 28) - 0.5) * 0.8;
+                out.push(Glyph::Marsh {
+                    at: [jx * s, jy * s],
+                    mangrove: biome == Biome::Mangrove,
                 });
             }
         }
@@ -413,6 +447,45 @@ fn draw_glyph(canvas: &mut Canvas, glyph: &Glyph, s: f32) {
             }
             let widths = vec![0.45 * s; points.len()];
             canvas.polyline(&points, &widths, INK, 0.85);
+        }
+        Glyph::Marsh { at, mangrove } => {
+            let [x, y] = at;
+            let k = 1.25 * s;
+            // Standing water: two short ruled lines.
+            canvas.line(
+                [x - 1.6 * k, y + 0.7 * k],
+                [x + 1.4 * k, y + 0.7 * k],
+                0.3 * k,
+                INK_WATER,
+                0.85,
+            );
+            canvas.line(
+                [x - 0.9 * k, y + 1.4 * k],
+                [x + 1.1 * k, y + 1.4 * k],
+                0.3 * k,
+                INK_WATER,
+                0.75,
+            );
+            if mangrove {
+                // Canopy on arched stilt roots.
+                for dx in [-0.9, 0.0, 0.9] {
+                    canvas.line(
+                        [x, y - 0.3 * k],
+                        [x + dx * k, y + 0.7 * k],
+                        0.3 * k,
+                        INK,
+                        0.9,
+                    );
+                }
+                canvas.dot([x, y - 1.0 * k], 1.0 * k, INK, 0.9);
+                canvas.dot([x, y - 1.0 * k], 0.6 * k, FOREST_FILL, 1.0);
+            } else {
+                // A grass tuft fanning up from one point.
+                let base = [x, y + 0.5 * k];
+                for (dx, dy) in [(-1.0, -0.9), (-0.4, -1.5), (0.2, -1.6), (0.8, -1.1)] {
+                    canvas.line(base, [x + dx * k, y + dy * k], 0.28 * k, INK, 0.9);
+                }
+            }
         }
         Glyph::Tree { at, kind } => {
             let trunk = |canvas: &mut Canvas, top: f32, bottom: f32| {

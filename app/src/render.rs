@@ -75,6 +75,8 @@ pub fn biome_colour(biome: Biome) -> Rgb {
         Biome::Savanna => [205, 185, 90],
         Biome::TropicalForest => [90, 160, 50],
         Biome::TropicalRainforest => [20, 110, 40],
+        Biome::Wetland => [95, 140, 125],
+        Biome::Mangrove => [45, 105, 90],
     }
 }
 

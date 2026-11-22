@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Bump when a change makes existing configs produce different worlds (new
 /// RNG derivation, changed algorithm or defaults), so saved configs can be
 /// detected as coming from an older generator.
-pub const GENERATOR_VERSION: u32 = 4;
+pub const GENERATOR_VERSION: u32 = 5;
 
 pub const MIN_PLATES: usize = 8;
 pub const MAX_PLATES: usize = 40;
@@ -28,6 +28,7 @@ pub struct WorldConfig {
     pub erosion: ErosionConfig,
     pub climate: ClimateConfig,
     pub hydrology: HydrologyConfig,
+    pub biomes: BiomeConfig,
     pub magic: MagicConfig,
     pub politics: PoliticsConfig,
     pub disasters: DisasterConfig,
@@ -48,6 +49,7 @@ impl Default for WorldConfig {
             erosion: ErosionConfig::default(),
             climate: ClimateConfig::default(),
             hydrology: HydrologyConfig::default(),
+            biomes: BiomeConfig::default(),
             magic: MagicConfig::default(),
             politics: PoliticsConfig::default(),
             disasters: DisasterConfig::default(),
@@ -179,6 +181,36 @@ impl Default for TerrainConfig {
 }
 
 pub const MAX_DROPLETS: u32 = 1_000_000;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BiomeConfig {
+    /// Amplitude (°C) of the noise added to temperature before classifying,
+    /// so biome borders come out ragged rather than following contours.
+    pub edge_jitter_c: f32,
+    /// Amplitude of the same noise on precipitation, as a fraction of it.
+    pub edge_jitter_frac: f32,
+    /// Flow accumulation (see hydrology) from which flat land is wetland,
+    /// for a 512-wide map (scaled for other sizes).
+    pub wetland_accumulation: f32,
+    /// Steepest slope that can be wetland, in normalised height per cell of
+    /// a 512-wide map (scaled for other sizes).
+    pub wetland_max_slope: f32,
+    /// Passes of the 3x3 majority filter that removes speckle.
+    pub smoothing_passes: u32,
+}
+
+impl Default for BiomeConfig {
+    fn default() -> Self {
+        Self {
+            edge_jitter_c: 2.5,
+            edge_jitter_frac: 0.15,
+            wetland_accumulation: 40.0,
+            wetland_max_slope: 0.004,
+            smoothing_passes: 2,
+        }
+    }
+}
 pub const MIN_RIVER_THRESHOLD: f32 = 5.0;
 pub const MAX_RIVER_THRESHOLD: f32 = 500.0;
 

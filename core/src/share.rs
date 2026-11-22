@@ -183,6 +183,8 @@ mod tests {
         config.magic.level = MagicLevel::Saturated;
         config.disasters.plagues.enabled = false;
         config.history.years = 12_000;
+        config.biomes.edge_jitter_c = 4.25;
+        config.biomes.smoothing_passes = 5;
         assert_eq!(decode(&encode(&config)).unwrap(), config);
     }
 

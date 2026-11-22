@@ -20,6 +20,7 @@ pub mod stage {
     pub const TECTONIC_CLUSTER: &str = "tectonics.cluster";
     pub const CLIMATE: &str = "climate";
     pub const EROSION: &str = "erosion";
+    pub const BIOMES: &str = "biomes";
 }
 
 const DOMAIN_STAGE: u64 = 0x5354_4147_4521_0001;

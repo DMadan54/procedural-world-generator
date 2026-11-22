@@ -19,7 +19,6 @@ use crate::link;
 use crate::render::{self, Rgb};
 use crate::setup::SetupPanel;
 use crate::style::{all_styles, MapStyle};
-use worldgen_core::Biome;
 
 /// What the central panel shows. Every pipeline stage gets an entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -378,11 +377,14 @@ impl WorldGenApp {
         match debug_view {
             None => {}
             Some(DebugView::Biomes) => {
-                let present: std::collections::BTreeSet<Biome> =
-                    self.world.biomes.biome.iter().copied().collect();
-                for biome in present {
-                    legend_row(ui, render::biome_colour(biome), biome.name());
+                ui.weak("Share of land");
+                for (biome, share) in self.world.biomes.coverage() {
+                    let label = format!("{} {:.1}%", biome.name(), share * 100.0);
+                    legend_row(ui, render::biome_colour(biome), &label);
                 }
+                ui.add_space(8.0);
+                ui.weak("Whittaker diagram");
+                whittaker_diagram(ui, &self.world);
             }
             Some(view) => match view {
                 DebugView::Plates => self.plate_legend(ui),
@@ -645,6 +647,83 @@ impl WorldGenApp {
             }
         }
     }
+}
+
+/// Temperature (x) against precipitation (y), shaded by the classification
+/// regions, with a fixed sample of land cells as dots in their biome colour.
+/// Shows at a glance whether a world's climate spread is believable.
+fn whittaker_diagram(ui: &mut egui::Ui, world: &World) {
+    const T_RANGE: (f32, f32) = (-20.0, 32.0);
+    const P_MAX: f32 = 4000.0;
+    const SAMPLES: usize = 2000;
+
+    let width = ui.available_width().min(220.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, width * 0.75), egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    let to_screen = |t: f32, p: f32| {
+        let u = (t - T_RANGE.0) / (T_RANGE.1 - T_RANGE.0);
+        let v = (p / P_MAX).clamp(0.0, 1.0);
+        egui::pos2(
+            rect.left() + u * rect.width(),
+            rect.bottom() - v * rect.height(),
+        )
+    };
+
+    // Regions: classify a grid of (temperature, precipitation) at sea level.
+    const STEPS: usize = 40;
+    for i in 0..STEPS {
+        for j in 0..STEPS {
+            let t0 = T_RANGE.0 + (T_RANGE.1 - T_RANGE.0) * i as f32 / STEPS as f32;
+            let t1 = T_RANGE.0 + (T_RANGE.1 - T_RANGE.0) * (i + 1) as f32 / STEPS as f32;
+            let p0 = P_MAX * j as f32 / STEPS as f32;
+            let p1 = P_MAX * (j + 1) as f32 / STEPS as f32;
+            let biome = worldgen_core::biome::classify((t0 + t1) / 2.0, (p0 + p1) / 2.0, 0.0);
+            let [r, g, b] = render::biome_colour(biome);
+            let cell = Rect::from_two_pos(to_screen(t0, p0), to_screen(t1, p1));
+            painter.rect_filled(cell, 0.0, Color32::from_rgb(r, g, b).gamma_multiply(0.45));
+        }
+    }
+
+    // A deterministic sample of land cells: every k-th one in index order.
+    let land: Vec<usize> = (0..world.biomes.biome.len())
+        .filter(|&i| !world.biomes.biome[i].is_water())
+        .collect();
+    let stride = (land.len() / SAMPLES).max(1);
+    for &i in land.iter().step_by(stride) {
+        let [r, g, b] = render::biome_colour(world.biomes.biome[i]);
+        let pos = to_screen(world.climate.temperature[i], world.climate.precipitation[i]);
+        painter.circle_filled(pos, 1.6_f32, Color32::from_rgb(r, g, b));
+    }
+
+    painter.rect_stroke(
+        rect,
+        0.0_f32,
+        Stroke::new(1.0_f32, Color32::GRAY),
+        egui::StrokeKind::Inside,
+    );
+    let small = egui::FontId::proportional(10.0);
+    let text = ui.visuals().weak_text_color();
+    painter.text(
+        rect.left_bottom() + egui::vec2(2.0, -2.0),
+        egui::Align2::LEFT_BOTTOM,
+        "-20 °C",
+        small.clone(),
+        text,
+    );
+    painter.text(
+        rect.right_bottom() + egui::vec2(-2.0, -2.0),
+        egui::Align2::RIGHT_BOTTOM,
+        "32 °C",
+        small.clone(),
+        text,
+    );
+    painter.text(
+        rect.left_top() + egui::vec2(2.0, 2.0),
+        egui::Align2::LEFT_TOP,
+        "4000 mm",
+        small,
+        text,
+    );
 }
 
 /// A small label in the top-left corner of the map.
