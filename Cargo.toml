@@ -26,3 +26,6 @@ opt-level = 3
 opt-level = 2
 [profile.dev.package.worldgen-core]
 opt-level = 2
+# Map styles rasterise millions of pixels; keep them usable in dev builds.
+[profile.dev.package.worldgen-app]
+opt-level = 2

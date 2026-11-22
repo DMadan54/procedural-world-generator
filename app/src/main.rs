@@ -1,5 +1,6 @@
 mod app;
 mod render;
+mod style;
 
 use app::WorldGenApp;
 

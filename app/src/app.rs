@@ -16,6 +16,8 @@ const EROSION_ROUNDS_PER_FRAME: usize = 1;
 const EROSION_CHANGE_SCALE: f32 = 0.04;
 
 use crate::render::{self, Rgb};
+use crate::style::{all_styles, MapStyle};
+use worldgen_core::Biome;
 
 /// What the central panel shows. Every pipeline stage gets an entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,10 +42,12 @@ enum DebugView {
     Wind,
     /// Hydrology stage: flow accumulation, lakes and rivers.
     Drainage,
+    /// Biome stage: biome per cell.
+    Biomes,
 }
 
 impl DebugView {
-    const ALL: [DebugView; 10] = [
+    const ALL: [DebugView; 11] = [
         DebugView::Terrain,
         DebugView::Plates,
         DebugView::TectonicRelief,
@@ -54,6 +58,7 @@ impl DebugView {
         DebugView::Precipitation,
         DebugView::Wind,
         DebugView::Drainage,
+        DebugView::Biomes,
     ];
 
     fn label(self) -> &'static str {
@@ -68,6 +73,7 @@ impl DebugView {
             DebugView::Precipitation => "Precipitation",
             DebugView::Wind => "Prevailing winds",
             DebugView::Drainage => "Drainage (flow accumulation)",
+            DebugView::Biomes => "Biomes",
         }
     }
 }
@@ -78,6 +84,9 @@ pub struct WorldGenApp {
     world: World,
     seed_text: String,
     seed_error: Option<String>,
+    /// Finished-map styles; `style` picks one, or `None` for a debug view.
+    styles: Vec<Box<dyn MapStyle>>,
+    style: Option<usize>,
     view: DebugView,
     /// Show the terrain as it was before erosion (Terrain and Heightmap views).
     before_erosion: bool,
@@ -95,6 +104,8 @@ impl WorldGenApp {
             config,
             world,
             seed_error: None,
+            styles: all_styles(),
+            style: Some(0),
             view: DebugView::Terrain,
             before_erosion: false,
             texture: None,
@@ -149,11 +160,17 @@ impl WorldGenApp {
     }
 
     fn render_view(&self) -> ColorImage {
+        if let Some(style) = self.style.and_then(|i| self.styles.get(i)) {
+            let canvas = style.render(&self.world);
+            return ColorImage::from_rgb([canvas.width, canvas.height], &canvas.to_rgb8());
+        }
         let (w, h) = (self.world.config.width, self.world.config.height);
         let sea = self.world.config.terrain.sea_level;
         let (map, climate) = (&self.world.terrain, &self.world.climate);
         match self.view {
-            DebugView::Terrain if self.before_erosion => render::hypsometric(&self.world.heightmap, sea),
+            DebugView::Terrain if self.before_erosion => {
+                render::hypsometric(&self.world.heightmap, sea)
+            }
             DebugView::Terrain => render::terrain_with_lakes(map, &self.world.hydrology, sea),
             DebugView::Plates => render::plates(&self.world.tectonics),
             DebugView::TectonicRelief => {
@@ -170,6 +187,7 @@ impl WorldGenApp {
             DebugView::Precipitation => render::precipitation(climate, map, sea),
             DebugView::Wind => render::wind_background(map, sea),
             DebugView::Drainage => render::flow_accumulation(map, &self.world.hydrology, sea),
+            DebugView::Biomes => render::biomes(&self.world.biomes),
         }
     }
 
@@ -199,7 +217,10 @@ impl WorldGenApp {
         }
         ui.add_space(4.0);
         let clicked = ui
-            .add_sized([ui.available_width(), 28.0], egui::Button::new("Regenerate"))
+            .add_sized(
+                [ui.available_width(), 28.0],
+                egui::Button::new("Regenerate"),
+            )
             .clicked();
         if clicked || pressed_enter {
             self.regenerate();
@@ -271,26 +292,43 @@ impl WorldGenApp {
 
         ui.add_space(12.0);
         ui.separator();
-        ui.label("Debug view");
-        let before = self.view;
-        egui::ComboBox::from_id_salt("debug_view")
+        ui.label("View");
+        let before = (self.style, self.view);
+        let selected = match self.style.and_then(|i| self.styles.get(i)) {
+            Some(style) => style.name(),
+            None => self.view.label(),
+        };
+        egui::ComboBox::from_id_salt("view")
             .width(ui.available_width())
-            .selected_text(self.view.label())
+            .selected_text(selected)
             .show_ui(ui, |ui| {
+                for (i, style) in self.styles.iter().enumerate() {
+                    if ui
+                        .selectable_label(self.style == Some(i), style.name())
+                        .clicked()
+                    {
+                        self.style = Some(i);
+                    }
+                }
+                ui.separator();
+                ui.weak("Debug views");
                 for view in DebugView::ALL {
-                    ui.selectable_value(&mut self.view, view, view.label());
+                    let on = self.style.is_none() && self.view == view;
+                    if ui.selectable_label(on, view.label()).clicked() {
+                        self.style = None;
+                        self.view = view;
+                    }
                 }
             });
-        if self.view != before {
+        if (self.style, self.view) != before {
             self.texture_dirty = true;
         }
 
-        if matches!(self.view, DebugView::Terrain | DebugView::Heightmap) {
+        if self.style.is_none() && matches!(self.view, DebugView::Terrain | DebugView::Heightmap) {
             let toggle = ui
                 .checkbox(&mut self.before_erosion, "Show before erosion (B)")
                 .changed();
-            let key = ui.input(|i| i.key_pressed(egui::Key::B))
-                && !ui.ctx().wants_keyboard_input();
+            let key = ui.input(|i| i.key_pressed(egui::Key::B)) && !ui.ctx().wants_keyboard_input();
             if key {
                 self.before_erosion = !self.before_erosion;
             }
@@ -300,38 +338,65 @@ impl WorldGenApp {
         }
 
         ui.add_space(8.0);
-        match self.view {
-            DebugView::Plates => self.plate_legend(ui),
-            DebugView::ErosionChange => {
-                legend_row(ui, [220, 50, 40], "Eroded");
-                legend_row(ui, [40, 110, 230], "Deposited");
-                ui.weak(format!(
-                    "Full colour at a change of {:.0}% of the height range.",
-                    EROSION_CHANGE_SCALE * 100.0
-                ));
-            }
-            DebugView::Temperature => {
-                for (value, colour) in render::TEMPERATURE_SCALE {
-                    legend_row(ui, colour, &format!("{value:.0} °C"));
+        let debug_view = if self.style.is_none() {
+            Some(self.view)
+        } else {
+            None
+        };
+        match debug_view {
+            None => {}
+            Some(DebugView::Biomes) => {
+                let present: std::collections::BTreeSet<Biome> =
+                    self.world.biomes.biome.iter().copied().collect();
+                for biome in present {
+                    legend_row(ui, render::biome_colour(biome), biome.name());
                 }
             }
-            DebugView::Precipitation => {
-                for (value, colour) in render::PRECIPITATION_SCALE {
-                    legend_row(ui, colour, &format!("{value:.0} mm/year"));
+            Some(view) => match view {
+                DebugView::Plates => self.plate_legend(ui),
+                DebugView::ErosionChange => {
+                    legend_row(ui, [220, 50, 40], "Eroded");
+                    legend_row(ui, [40, 110, 230], "Deposited");
+                    ui.weak(format!(
+                        "Full colour at a change of {:.0}% of the height range.",
+                        EROSION_CHANGE_SCALE * 100.0
+                    ));
                 }
-            }
-            DebugView::Wind => {
-                ui.weak("Easterly trades 0-30°, westerlies 30-60°, polar easterlies 60-90°.");
-            }
-            DebugView::Terrain | DebugView::Drainage if !self.before_erosion => {
-                let hy = &self.world.hydrology;
-                legend_row(ui, render::RIVER, &format!("Rivers: {} ({} segments)", hy.rivers.len(), hy.segments.len()));
-                legend_row(ui, render::LAKE, &format!("Lakes: {}", hy.lakes.len()));
-                if let Some(longest) = hy.rivers.iter().max_by(|a, b| a.discharge.total_cmp(&b.discharge)) {
-                    ui.weak(format!("Largest river discharge: {:.0}", longest.discharge));
+                DebugView::Temperature => {
+                    for (value, colour) in render::TEMPERATURE_SCALE {
+                        legend_row(ui, colour, &format!("{value:.0} °C"));
+                    }
                 }
-            }
-            _ => {}
+                DebugView::Precipitation => {
+                    for (value, colour) in render::PRECIPITATION_SCALE {
+                        legend_row(ui, colour, &format!("{value:.0} mm/year"));
+                    }
+                }
+                DebugView::Wind => {
+                    ui.weak("Easterly trades 0-30°, westerlies 30-60°, polar easterlies 60-90°.");
+                }
+                DebugView::Terrain | DebugView::Drainage if !self.before_erosion => {
+                    let hy = &self.world.hydrology;
+                    legend_row(
+                        ui,
+                        render::RIVER,
+                        &format!(
+                            "Rivers: {} ({} segments)",
+                            hy.rivers.len(),
+                            hy.segments.len()
+                        ),
+                    );
+                    legend_row(ui, render::LAKE, &format!("Lakes: {}", hy.lakes.len()));
+                    if let Some(longest) = hy
+                        .rivers
+                        .iter()
+                        .max_by(|a, b| a.discharge.total_cmp(&b.discharge))
+                    {
+                        ui.weak(format!("Largest river discharge: {:.0}", longest.discharge));
+                    }
+                }
+                _ => {}
+            },
         }
 
         ui.add_space(12.0);
@@ -374,13 +439,37 @@ impl WorldGenApp {
     fn plate_legend(&self, ui: &mut egui::Ui) {
         let t = &self.world.tectonics;
         let count = |kind| t.boundaries.iter().filter(|b| b.kind == kind).count();
-        let continental = t.plates.iter().filter(|p| p.kind == PlateKind::Continental).count();
+        let continental = t
+            .plates
+            .iter()
+            .filter(|p| p.kind == PlateKind::Continental)
+            .count();
 
-        legend_row(ui, render::plate_colour(1, PlateKind::Continental), &format!("Continental plates: {continental}"));
-        legend_row(ui, render::plate_colour(1, PlateKind::Oceanic), &format!("Oceanic plates: {}", t.plates.len() - continental));
-        legend_row(ui, render::CONVERGENT, &format!("Convergent: {}", count(BoundaryKind::Convergent)));
-        legend_row(ui, render::DIVERGENT, &format!("Divergent: {}", count(BoundaryKind::Divergent)));
-        legend_row(ui, render::TRANSFORM, &format!("Transform: {}", count(BoundaryKind::Transform)));
+        legend_row(
+            ui,
+            render::plate_colour(1, PlateKind::Continental),
+            &format!("Continental plates: {continental}"),
+        );
+        legend_row(
+            ui,
+            render::plate_colour(1, PlateKind::Oceanic),
+            &format!("Oceanic plates: {}", t.plates.len() - continental),
+        );
+        legend_row(
+            ui,
+            render::CONVERGENT,
+            &format!("Convergent: {}", count(BoundaryKind::Convergent)),
+        );
+        legend_row(
+            ui,
+            render::DIVERGENT,
+            &format!("Divergent: {}", count(BoundaryKind::Divergent)),
+        );
+        legend_row(
+            ui,
+            render::TRANSFORM,
+            &format!("Transform: {}", count(BoundaryKind::Transform)),
+        );
         ui.weak("Arrows show each plate's drift.");
     }
 
@@ -390,13 +479,22 @@ impl WorldGenApp {
             return;
         }
         let image = self.render_view();
+        // Styled maps are drawn above world resolution: smooth them when
+        // scaling. Debug views show exact cells.
+        let options = self.texture_options();
         match &mut self.texture {
-            Some(texture) => texture.set(image, TextureOptions::NEAREST),
-            None => {
-                self.texture = Some(ctx.load_texture("debug_view", image, TextureOptions::NEAREST))
-            }
+            Some(texture) => texture.set(image, options),
+            None => self.texture = Some(ctx.load_texture("view", image, options)),
         }
         self.texture_dirty = false;
+    }
+
+    fn texture_options(&self) -> TextureOptions {
+        if self.style.is_some() {
+            TextureOptions::LINEAR
+        } else {
+            TextureOptions::NEAREST
+        }
     }
 
     fn central_panel(&mut self, ctx: &egui::Context) {
@@ -411,18 +509,31 @@ impl WorldGenApp {
             let rect = Rect::from_center_size(panel.center(), egui::vec2(w * scale, h * scale));
             egui::Image::new(texture).paint_at(ui, rect);
 
-            match self.view {
-                DebugView::Plates => self.draw_drift_arrows(ui.painter(), rect),
-                DebugView::Wind => self.draw_wind_arrows(ui.painter(), rect),
-                DebugView::Terrain | DebugView::Drainage if !self.before_erosion => {
+            let debug_view = if self.style.is_none() {
+                Some(self.view)
+            } else {
+                None
+            };
+            // Styled maps draw everything themselves; debug views get overlays.
+            match debug_view {
+                Some(DebugView::Plates) => self.draw_drift_arrows(ui.painter(), rect),
+                Some(DebugView::Wind) => self.draw_wind_arrows(ui.painter(), rect),
+                Some(DebugView::Terrain | DebugView::Drainage) if !self.before_erosion => {
                     self.draw_rivers(ui.painter(), rect)
                 }
                 _ => {}
             }
-            if self.before_erosion && matches!(self.view, DebugView::Terrain | DebugView::Heightmap) {
+            if self.style.is_none()
+                && self.before_erosion
+                && matches!(self.view, DebugView::Terrain | DebugView::Heightmap)
+            {
                 badge(ui.painter(), rect, "Before erosion");
             } else if let Some(progress) = self.world.erosion_progress() {
-                badge(ui.painter(), rect, &format!("Eroding… {:.0}%", progress * 100.0));
+                badge(
+                    ui.painter(),
+                    rect,
+                    &format!("Eroding… {:.0}%", progress * 100.0),
+                );
             }
         });
     }
@@ -430,13 +541,21 @@ impl WorldGenApp {
     fn draw_drift_arrows(&self, painter: &egui::Painter, rect: Rect) {
         let t = &self.world.tectonics;
         let to_screen = |p: [f32; 2]| {
-            rect.min + egui::vec2(p[0] / t.width as f32 * rect.width(), p[1] / t.height as f32 * rect.height())
+            rect.min
+                + egui::vec2(
+                    p[0] / t.width as f32 * rect.width(),
+                    p[1] / t.height as f32 * rect.height(),
+                )
         };
         let length = rect.width() * 0.07;
         for plate in &t.plates {
             let origin = to_screen(plate.centre);
             let arrow = egui::vec2(plate.drift[0], plate.drift[1]) * length;
-            painter.arrow(origin, arrow, Stroke::new(4.0_f32, Color32::from_black_alpha(170)));
+            painter.arrow(
+                origin,
+                arrow,
+                Stroke::new(4.0_f32, Color32::from_black_alpha(170)),
+            );
             painter.arrow(origin, arrow, Stroke::new(2.0_f32, Color32::WHITE));
             painter.circle_filled(origin, 3.5_f32, Color32::WHITE);
             painter.circle_stroke(origin, 3.5_f32, Stroke::new(1.0_f32, Color32::BLACK));
@@ -512,10 +631,17 @@ fn badge(painter: &egui::Painter, rect: Rect, text: &str) {
 fn legend_row(ui: &mut egui::Ui, colour: Rgb, label: &str) {
     ui.horizontal(|ui| {
         let (swatch, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
-        ui.painter()
-            .rect_filled(swatch, 2.0_f32, Color32::from_rgb(colour[0], colour[1], colour[2]));
-        ui.painter()
-            .rect_stroke(swatch, 2.0_f32, Stroke::new(1.0_f32, Color32::GRAY), egui::StrokeKind::Inside);
+        ui.painter().rect_filled(
+            swatch,
+            2.0_f32,
+            Color32::from_rgb(colour[0], colour[1], colour[2]),
+        );
+        ui.painter().rect_stroke(
+            swatch,
+            2.0_f32,
+            Stroke::new(1.0_f32, Color32::GRAY),
+            egui::StrokeKind::Inside,
+        );
         ui.label(label);
     });
 }

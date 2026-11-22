@@ -4,7 +4,7 @@
 use eframe::egui::ColorImage;
 use worldgen_core::hydrology::NO_LAKE;
 use worldgen_core::{
-    BoundaryKind, Climate, Heightmap, Hydrology, PlateKind, TectonicMap, NO_BOUNDARY,
+    Biome, Biomes, BoundaryKind, Climate, Heightmap, Hydrology, PlateKind, TectonicMap, NO_BOUNDARY,
 };
 
 /// Colour stops for mean temperature, °C.
@@ -57,6 +57,32 @@ pub fn erosion_change(before: &Heightmap, after: &Heightmap, scale: f32) -> Colo
 }
 
 pub const LAKE: Rgb = [70, 135, 190];
+
+/// Flat debug colour per biome.
+pub fn biome_colour(biome: Biome) -> Rgb {
+    match biome {
+        Biome::Ocean => [30, 60, 110],
+        Biome::Lake => LAKE,
+        Biome::Ice => [240, 245, 250],
+        Biome::Tundra => [170, 180, 165],
+        Biome::Alpine => [140, 130, 125],
+        Biome::BorealForest => [50, 95, 70],
+        Biome::TemperateForest => [70, 135, 60],
+        Biome::TemperateRainforest => [40, 120, 90],
+        Biome::Shrubland => [175, 160, 95],
+        Biome::Grassland => [170, 195, 100],
+        Biome::Desert => [230, 205, 140],
+        Biome::Savanna => [205, 185, 90],
+        Biome::TropicalForest => [90, 160, 50],
+        Biome::TropicalRainforest => [20, 110, 40],
+    }
+}
+
+/// Biomes in flat colours.
+pub fn biomes(biomes: &Biomes) -> ColorImage {
+    let rgb: Vec<u8> = biomes.biome.iter().flat_map(|&b| biome_colour(b)).collect();
+    ColorImage::from_rgb([biomes.width, biomes.height], &rgb)
+}
 pub const RIVER: Rgb = [45, 105, 185];
 
 /// Hypsometric terrain with lakes drawn as flat water.
