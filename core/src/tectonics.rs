@@ -153,7 +153,12 @@ fn scatter_plates(
     let clustering = params.continent_clustering.clamp(0.0, 1.0);
     if clustering > 0.0 {
         let focus_rng = &mut stage_rng(seed, stage::TECTONIC_CLUSTER);
-        let focus = [unit_f32(focus_rng) * w, unit_f32(focus_rng) * h];
+        // Keep the supercontinent near the middle so it isn't cut off by
+        // the map edge.
+        let focus = [
+            (0.35 + 0.3 * unit_f32(focus_rng)) * w,
+            (0.35 + 0.3 * unit_f32(focus_rng)) * h,
+        ];
         let diagonal = (w * w + h * h).sqrt().max(1.0);
         let mut rank = vec![0.0f32; count];
         for (position, &plate) in order.iter().enumerate() {
@@ -544,6 +549,25 @@ mod tests {
             total / (land.len() * land.len()) as f32
         };
         assert!(spread(1.0) < spread(0.0));
+    }
+
+    #[test]
+    fn supercontinent_sits_near_the_middle() {
+        for seed in 0..6 {
+            let mut c = config(seed, 16);
+            c.tectonics.continent_clustering = 1.0;
+            let map = generate_tectonics(&c);
+            let land: Vec<_> = map
+                .plates
+                .iter()
+                .filter(|p| p.kind == PlateKind::Continental)
+                .map(|p| p.centre)
+                .collect();
+            let n = land.len() as f32;
+            let cx = land.iter().map(|p| p[0]).sum::<f32>() / n / W as f32;
+            let cy = land.iter().map(|p| p[1]).sum::<f32>() / n / H as f32;
+            assert!((0.2..0.8).contains(&cx) && (0.2..0.8).contains(&cy), "seed {seed}: ({cx}, {cy})");
+        }
     }
 
     #[test]
