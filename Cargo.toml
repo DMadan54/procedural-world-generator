@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = ["core", "app"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+worldgen-core = { path = "core" }
+noise = "0.9"
+# No default features: the `std` feature pulls in getrandom (OS entropy), which
+# we never want and which does not build for wasm32-unknown-unknown.
+rand_chacha = { version = "0.3", default-features = false }
+eframe = "0.32"
+
+[profile.release]
+opt-level = 3
+
+# Noise generation is slow unoptimised; keep dev builds usable.
+[profile.dev.package."*"]
+opt-level = 2
+[profile.dev.package.worldgen-core]
+opt-level = 2

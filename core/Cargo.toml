@@ -1,0 +1,12 @@
+[package]
+# Not named `core`: that would shadow Rust's built-in `core` crate, which
+# derive and format macros reference as `::core::...`.
+name = "worldgen-core"
+description = "Deterministic world generation logic, free of UI dependencies."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+noise.workspace = true
+rand_chacha.workspace = true
