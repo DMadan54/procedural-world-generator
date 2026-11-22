@@ -1,0 +1,11 @@
+# Run trunk from this directory: `trunk serve` locally, `trunk build --release`
+# for deploys. CI passes --public-url /procedural-world-generator/ for GitHub
+# Pages; locally the site is served from the root.
+[build]
+target = "index.html"
+dist = "dist"
+public_url = "/"
+
+[serve]
+port = 8080
+open = false
