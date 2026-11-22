@@ -136,7 +136,8 @@ pub fn generate_climate(config: &WorldConfig, heightmap: &Heightmap) -> Climate 
         }
     }
 
-    let mut precipitation = march_parcels(cfg, width, height, &elevation, &ocean, &temperature, &wind);
+    let mut precipitation =
+        march_parcels(cfg, width, height, &elevation, &ocean, &temperature, &wind);
     gaussian_blur(&mut precipitation, width, height, 1.5, false);
     for y in 0..height {
         for x in 0..width {
@@ -180,7 +181,14 @@ fn march_parcels(
     let step = 512.0 / width as f32;
     let blows_east: Vec<bool> = (0..height).map(|y| wind[y * width][0] >= 0.0).collect();
     let tendency: Vec<f32> = (0..height)
-        .map(|y| rain_tendency(band_latitude(y, height, cfg.latitude_north, cfg.latitude_south)))
+        .map(|y| {
+            rain_tendency(band_latitude(
+                y,
+                height,
+                cfg.latitude_north,
+                cfg.latitude_south,
+            ))
+        })
         .collect();
 
     for eastward in [true, false] {
@@ -220,7 +228,11 @@ fn march_parcels(
                 };
 
                 let mut m = incoming;
-                let pickup = if ocean[i] { cfg.evaporation } else { 0.2 * cfg.evaporation };
+                let pickup = if ocean[i] {
+                    cfg.evaporation
+                } else {
+                    0.2 * cfg.evaporation
+                };
                 m += (pickup * step).min(1.0) * (capacity - m).max(0.0);
 
                 // Forced ascent: rain out a share per km climbed.
@@ -264,7 +276,10 @@ mod tests {
     fn deterministic() {
         let config = WorldConfig::default();
         let map = flat_world(64, 0.3);
-        assert_eq!(generate_climate(&config, &map), generate_climate(&config, &map));
+        assert_eq!(
+            generate_climate(&config, &map),
+            generate_climate(&config, &map)
+        );
     }
 
     #[test]
@@ -378,6 +393,11 @@ mod tests {
         let climate = generate_climate(&WorldConfig::default(), &map);
         let y = 32;
         let at = |x: usize| climate.precipitation[y * size + x];
-        assert!(at(36) > 1.1 * at(120), "coast {} vs interior {}", at(36), at(120));
+        assert!(
+            at(36) > 1.1 * at(120),
+            "coast {} vs interior {}",
+            at(36),
+            at(120)
+        );
     }
 }

@@ -78,7 +78,10 @@ impl ErosionJob {
     /// Runs whatever is left and returns the eroded map, clamped to `0..=1`.
     pub fn finish(mut self) -> Heightmap {
         self.step(usize::MAX);
-        self.map.data.iter_mut().for_each(|h| *h = h.clamp(0.0, 1.0));
+        self.map
+            .data
+            .iter_mut()
+            .for_each(|h| *h = h.clamp(0.0, 1.0));
         self.map
     }
 
@@ -136,7 +139,10 @@ fn brush(radius: u32) -> Vec<(isize, isize, f32)> {
         }
     }
     let total: f32 = cells.iter().map(|c| c.2).sum();
-    cells.iter().map(|&(dx, dy, w)| (dx, dy, w / total)).collect()
+    cells
+        .iter()
+        .map(|&(dx, dy, w)| (dx, dy, w / total))
+        .collect()
 }
 
 /// Simulates one chunk of droplets on a private copy of `snapshot` and
@@ -204,7 +210,8 @@ fn simulate_chunk(
                 // Never dig deeper than the drop to the next position.
                 let amount = ((capacity - sediment) * p.erosion_rate).min(-dh);
                 for &(dx, dy, weight) in brush {
-                    let (Some(nx), Some(ny)) = (cx.checked_add_signed(dx), cy.checked_add_signed(dy))
+                    let (Some(nx), Some(ny)) =
+                        (cx.checked_add_signed(dx), cy.checked_add_signed(dy))
                     else {
                         continue;
                     };
@@ -344,7 +351,15 @@ mod tests {
         let job = ErosionJob::new(&c, &map);
         let mut manual = map.clone();
         let changes: Vec<_> = (0..3)
-            .map(|k| simulate_chunk(&map, &c.erosion, &job.brush, job.chunk_seeds[k], CHUNK_DROPLETS))
+            .map(|k| {
+                simulate_chunk(
+                    &map,
+                    &c.erosion,
+                    &job.brush,
+                    job.chunk_seeds[k],
+                    CHUNK_DROPLETS,
+                )
+            })
             .collect();
         for chunk in changes {
             for (i, d) in chunk {

@@ -172,8 +172,10 @@ mod tests {
 
     #[test]
     fn changed_world_round_trips_exactly() {
-        let mut config = WorldConfig::default();
-        config.seed = 987_654_321_012;
+        let mut config = WorldConfig {
+            seed: 987_654_321_012,
+            ..Default::default()
+        };
         config.terrain.sea_level = 0.53;
         config.tectonics.plate_count = 31;
         config.tectonics.boundary_warp = 0.0712345;
@@ -186,8 +188,10 @@ mod tests {
 
     #[test]
     fn codes_are_short_and_url_safe() {
-        let mut config = WorldConfig::default();
-        config.seed = 123_456;
+        let mut config = WorldConfig {
+            seed: 123_456,
+            ..Default::default()
+        };
         config.terrain.sea_level = 0.5;
         config.magic.level = MagicLevel::Rare;
         let code = encode(&config);

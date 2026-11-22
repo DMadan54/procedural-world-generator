@@ -5,7 +5,13 @@
 /// With `line_gain`, the result is rescaled so a boundary line (two pixels
 /// wide, one on each plate) keeps its original peak value at its centre and
 /// falls off from there, instead of being smeared down to a fraction of it.
-pub(crate) fn gaussian_blur(data: &mut [f32], width: usize, height: usize, sigma: f32, line_gain: bool) {
+pub(crate) fn gaussian_blur(
+    data: &mut [f32],
+    width: usize,
+    height: usize,
+    sigma: f32,
+    line_gain: bool,
+) {
     // Three box passes of radius r have variance r * (r + 1).
     let radius = ((sigma * sigma + 0.25).sqrt() - 0.5).round().max(1.0) as usize;
     for _ in 0..3 {

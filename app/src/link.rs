@@ -113,8 +113,10 @@ mod tests {
 
     #[test]
     fn links_round_trip() {
-        let mut config = WorldConfig::default();
-        config.seed = 4242;
+        let mut config = WorldConfig {
+            seed: 4242,
+            ..Default::default()
+        };
         config.terrain.sea_level = 0.5;
         let link = link_for(&config);
         assert!(link.starts_with(SITE_URL));

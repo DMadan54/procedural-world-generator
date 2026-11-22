@@ -92,8 +92,16 @@ impl Canvas {
             return;
         }
         let sign = area.signum();
-        let ys = Self::span(a[1].min(b[1]).min(c[1]), a[1].max(b[1]).max(c[1]), self.height);
-        let xs = Self::span(a[0].min(b[0]).min(c[0]), a[0].max(b[0]).max(c[0]), self.width);
+        let ys = Self::span(
+            a[1].min(b[1]).min(c[1]),
+            a[1].max(b[1]).max(c[1]),
+            self.height,
+        );
+        let xs = Self::span(
+            a[0].min(b[0]).min(c[0]),
+            a[0].max(b[0]).max(c[0]),
+            self.width,
+        );
         for y in ys {
             for x in xs.clone() {
                 let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);

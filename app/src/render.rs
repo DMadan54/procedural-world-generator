@@ -140,7 +140,12 @@ pub fn wind_background(map: &Heightmap, sea_level: f32) -> ColorImage {
     ColorImage::from_rgb([map.width, map.height], &rgb)
 }
 
-fn scaled_field(values: &[f32], scale: &[(f32, Rgb)], map: &Heightmap, sea_level: f32) -> ColorImage {
+fn scaled_field(
+    values: &[f32],
+    scale: &[(f32, Rgb)],
+    map: &Heightmap,
+    sea_level: f32,
+) -> ColorImage {
     let rgb: Vec<u8> = values
         .iter()
         .zip(&map.data)
@@ -203,7 +208,9 @@ pub fn greyscale(map: &Heightmap) -> ColorImage {
 pub fn stretched_greyscale(width: usize, height: usize, values: &[f32]) -> ColorImage {
     let (min, max) = values
         .iter()
-        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| {
+            (lo.min(v), hi.max(v))
+        });
     let range = (max - min).max(f32::EPSILON);
     let grey: Vec<u8> = values
         .iter()

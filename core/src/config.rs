@@ -383,8 +383,10 @@ mod tests {
 
     #[test]
     fn json_round_trip() {
-        let mut config = WorldConfig::default();
-        config.seed = 123;
+        let mut config = WorldConfig {
+            seed: 123,
+            ..Default::default()
+        };
         config.tectonics.plate_count = 30;
         let json = serde_json::to_string(&config).unwrap();
         let back: WorldConfig = serde_json::from_str(&json).unwrap();

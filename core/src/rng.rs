@@ -55,13 +55,14 @@ fn mix(mut z: u64) -> u64 {
 
 /// Absorbs the parts into a 32-byte ChaCha key.
 fn derive_key(parts: &[u64]) -> [u8; 32] {
-    let state = parts
-        .iter()
-        .fold(GOLDEN, |state, &part| mix(state.wrapping_add(GOLDEN) ^ part));
+    let state = parts.iter().fold(
+        GOLDEN,
+        |state, &part| mix(state.wrapping_add(GOLDEN) ^ part),
+    );
     let mut key = [0u8; 32];
-    for (i, chunk) in key.chunks_exact_mut(8).enumerate() {
+    for (i, chunk) in key.as_chunks_mut::<8>().0.iter_mut().enumerate() {
         let word = mix(state.wrapping_add((i as u64 + 1).wrapping_mul(GOLDEN)));
-        chunk.copy_from_slice(&word.to_le_bytes());
+        *chunk = word.to_le_bytes();
     }
     key
 }
@@ -101,7 +102,10 @@ mod tests {
         assert_ne!(base, first(stage_rng(8, "noise")));
         assert_ne!(base, first(stage_rng(7, "tectonics.plates")));
         assert_ne!(base, first(entity_rng(7, "noise", 0)));
-        assert_ne!(first(entity_rng(7, "noise", 0)), first(entity_rng(7, "noise", 1)));
+        assert_ne!(
+            first(entity_rng(7, "noise", 0)),
+            first(entity_rng(7, "noise", 1))
+        );
         assert_ne!(first(entity_rng(7, "a", 0)), first(entity_rng(7, "b", 0)));
     }
 
@@ -112,7 +116,10 @@ mod tests {
         assert_eq!(fnv1a(""), 0xCBF2_9CE4_8422_2325);
         assert_eq!(fnv1a("a"), 0xAF63_DC4C_8601_EC8C);
         assert_eq!(first(stage_rng(42, stage::NOISE)), STAGE_42_NOISE);
-        assert_eq!(first(entity_rng(42, stage::TECTONIC_DRIFT, 3)), ENTITY_42_DRIFT_3);
+        assert_eq!(
+            first(entity_rng(42, stage::TECTONIC_DRIFT, 3)),
+            ENTITY_42_DRIFT_3
+        );
     }
     const STAGE_42_NOISE: u64 = 8582476738564353936;
     const ENTITY_42_DRIFT_3: u64 = 10992505513941621850;

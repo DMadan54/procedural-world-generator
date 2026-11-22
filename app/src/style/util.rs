@@ -77,7 +77,11 @@ pub fn distance_to(source: &[bool], width: usize, height: usize) -> Vec<f32> {
 
 /// Chaikin corner cutting: rounds a polyline while keeping its endpoints.
 /// `values` (e.g. widths) are interpolated alongside the points.
-pub fn chaikin(points: &[[f32; 2]], values: &[f32], iterations: usize) -> (Vec<[f32; 2]>, Vec<f32>) {
+pub fn chaikin(
+    points: &[[f32; 2]],
+    values: &[f32],
+    iterations: usize,
+) -> (Vec<[f32; 2]>, Vec<f32>) {
     let (mut p, mut v) = (points.to_vec(), values.to_vec());
     for _ in 0..iterations {
         if p.len() < 3 {
@@ -108,7 +112,11 @@ pub fn chaikin(points: &[[f32; 2]], values: &[f32], iterations: usize) -> (Vec<[
 
 pub fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     let t = t.clamp(0.0, 1.0);
-    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
 }
 
 #[cfg(test)]

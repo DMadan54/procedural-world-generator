@@ -73,7 +73,9 @@ fn soft_limit(h: f32) -> f32 {
 pub(crate) fn normalise(data: &mut [f32]) {
     let (min, max) = data
         .iter()
-        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| {
+            (lo.min(v), hi.max(v))
+        });
     let range = max - min;
     if !range.is_finite() || range <= f32::EPSILON {
         data.iter_mut().for_each(|v| *v = 0.0);

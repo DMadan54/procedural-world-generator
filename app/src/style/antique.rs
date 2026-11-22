@@ -54,9 +54,23 @@ impl Default for AntiqueStyle {
 
 /// Something drawn on top of the land, painted back to front.
 enum Glyph {
-    Mountain { base: [f32; 2], dir: [f32; 2], height: f32, half_width: f32, skew: f32, tint: Colour },
-    Hill { base: [f32; 2], half_width: f32, height: f32 },
-    Tree { at: [f32; 2], kind: Biome },
+    Mountain {
+        base: [f32; 2],
+        dir: [f32; 2],
+        height: f32,
+        half_width: f32,
+        skew: f32,
+        tint: Colour,
+    },
+    Hill {
+        base: [f32; 2],
+        half_width: f32,
+        height: f32,
+    },
+    Tree {
+        at: [f32; 2],
+        kind: Biome,
+    },
 }
 
 impl Glyph {
@@ -157,7 +171,10 @@ impl MapStyle for AntiqueStyle {
                     let d = dist_to_land[i];
                     let reach = if lake[i] { 5.0 * s } else { 13.0 * s };
                     if d > 1.2 * s && d < reach {
-                        let wobble = (value_noise(cx as f32 / (6.0 * s), cy as f32 / (6.0 * s), 1) - 0.5) * 1.2 * s;
+                        let wobble = (value_noise(cx as f32 / (6.0 * s), cy as f32 / (6.0 * s), 1)
+                            - 0.5)
+                            * 1.2
+                            * s;
                         let v = (d + wobble) / hatch_spacing;
                         let off = (v - v.round()).abs() * hatch_spacing;
                         let coverage = (0.35 * s + 0.5 - off).clamp(0.0, 1.0);
@@ -168,7 +185,12 @@ impl MapStyle for AntiqueStyle {
                     canvas.blend(cx, cy, INK, (1.0 - dist_to_land[i]).clamp(0.0, 1.0) * 0.7);
                 } else {
                     // Shoreline on the land side.
-                    canvas.blend(cx, cy, INK, (0.6 * s + 0.5 - dist_to_water[i]).clamp(0.0, 1.0) * 0.9);
+                    canvas.blend(
+                        cx,
+                        cy,
+                        INK,
+                        (0.6 * s + 0.5 - dist_to_water[i]).clamp(0.0, 1.0) * 0.9,
+                    );
                 }
             }
         }
@@ -181,7 +203,11 @@ impl MapStyle for AntiqueStyle {
                 .iter()
                 .map(|q| (0.3 + 0.3 * (q / threshold).sqrt()).clamp(0.4, 1.7) * s)
                 .collect();
-            let points: Vec<[f32; 2]> = segment.points.iter().map(|p| [p[0] * s, p[1] * s]).collect();
+            let points: Vec<[f32; 2]> = segment
+                .points
+                .iter()
+                .map(|p| [p[0] * s, p[1] * s])
+                .collect();
             let (points, widths) = chaikin(&points, &widths, 2);
             canvas.polyline(&points, &widths, INK_RIVER, 0.9);
         }
@@ -204,7 +230,13 @@ impl MapStyle for AntiqueStyle {
 impl AntiqueStyle {
     /// Mountains and hills on a jittered grid, sized by elevation and
     /// stretched along the local ridge direction.
-    fn place_relief(&self, world: &World, s: f32, tint_at: &dyn Fn(f32, f32) -> Colour, out: &mut Vec<Glyph>) {
+    fn place_relief(
+        &self,
+        world: &World,
+        s: f32,
+        tint_at: &dyn Fn(f32, f32) -> Colour,
+        out: &mut Vec<Glyph>,
+    ) {
         let terrain = &world.terrain;
         let (mw, mh) = (terrain.width, terrain.height);
         let tc = &world.config.terrain;
@@ -226,20 +258,32 @@ impl AntiqueStyle {
                 let base = [x * s, y * s];
                 if elevation < MOUNTAIN_MIN_M {
                     if hash(gx, gy, 13) < 0.55 {
-                        out.push(Glyph::Hill { base, half_width: 2.6 * s, height: 1.5 * s });
+                        out.push(Glyph::Hill {
+                            base,
+                            half_width: 2.6 * s,
+                            height: 1.5 * s,
+                        });
                     }
                     continue;
                 }
                 // Ridges run across the slope.
                 let r = 3.0;
-                let (gxv, gyv) = (h_at(x + r, y) - h_at(x - r, y), h_at(x, y + r) - h_at(x, y - r));
+                let (gxv, gyv) = (
+                    h_at(x + r, y) - h_at(x - r, y),
+                    h_at(x, y + r) - h_at(x, y - r),
+                );
                 let mut dir = [-gyv, gxv * 0.4];
                 let len = (dir[0] * dir[0] + dir[1] * dir[1]).sqrt();
-                dir = if len > 1e-6 { [dir[0] / len, dir[1] / len] } else { [1.0, 0.0] };
+                dir = if len > 1e-6 {
+                    [dir[0] / len, dir[1] / len]
+                } else {
+                    [1.0, 0.0]
+                };
                 if dir[0] < 0.0 {
                     dir = [-dir[0], -dir[1]];
                 }
-                let t = ((elevation - MOUNTAIN_MIN_M) / (tc.max_elevation_m - MOUNTAIN_MIN_M)).clamp(0.0, 1.0);
+                let t = ((elevation - MOUNTAIN_MIN_M) / (tc.max_elevation_m - MOUNTAIN_MIN_M))
+                    .clamp(0.0, 1.0);
                 let height = (4.5 + 9.0 * t.sqrt()) * s;
                 out.push(Glyph::Mountain {
                     base,
@@ -278,7 +322,12 @@ impl AntiqueStyle {
                 // Stipple the forest floor.
                 for k in 0..2 {
                     let (dx, dy) = (hash(gx, gy, 30 + k) - 0.5, hash(gx, gy, 40 + k) - 0.5);
-                    canvas.dot([(x + dx * step) * s, (y + dy * step) * s], 0.3 * s, INK, 0.35);
+                    canvas.dot(
+                        [(x + dx * step) * s, (y + dy * step) * s],
+                        0.3 * s,
+                        INK,
+                        0.35,
+                    );
                 }
                 // Trees grow in clumps.
                 let density = match biome {
@@ -290,7 +339,10 @@ impl AntiqueStyle {
                 if clump < 1.0 - density * 0.85 || hash(gx, gy, 24) > density {
                     continue;
                 }
-                out.push(Glyph::Tree { at: [x * s, y * s], kind: biome });
+                out.push(Glyph::Tree {
+                    at: [x * s, y * s],
+                    kind: biome,
+                });
             }
         }
     }
@@ -317,15 +369,27 @@ fn near_water_or_river(world: &World, x: usize, y: usize) -> bool {
 
 fn draw_glyph(canvas: &mut Canvas, glyph: &Glyph, s: f32) {
     match *glyph {
-        Glyph::Mountain { base, dir, height, half_width, skew, tint } => {
+        Glyph::Mountain {
+            base,
+            dir,
+            height,
+            half_width,
+            skew,
+            tint,
+        } => {
             let left = [base[0] - dir[0] * half_width, base[1] - dir[1] * half_width];
             let right = [base[0] + dir[0] * half_width, base[1] + dir[1] * half_width];
-            let peak = [base[0] + dir[0] * half_width * skew, base[1] - height + dir[1] * half_width * skew];
+            let peak = [
+                base[0] + dir[0] * half_width * skew,
+                base[1] - height + dir[1] * half_width * skew,
+            ];
             // Paper-coloured body hides glyphs behind it.
             canvas.triangle(left, peak, right, tint);
             // Shadow on the right flank: short strokes from the slope towards
             // the foot of the mountain.
-            let lerp = |a: [f32; 2], b: [f32; 2], t: f32| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+            let lerp = |a: [f32; 2], b: [f32; 2], t: f32| {
+                [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+            };
             let lines = 2 + (height / (3.0 * s)) as usize;
             for k in 1..=lines {
                 let start = lerp(peak, right, k as f32 / (lines + 1) as f32);
@@ -334,7 +398,11 @@ fn draw_glyph(canvas: &mut Canvas, glyph: &Glyph, s: f32) {
             canvas.line(left, peak, 0.55 * s, INK, 1.0);
             canvas.line(peak, right, 0.55 * s, INK, 1.0);
         }
-        Glyph::Hill { base, half_width, height } => {
+        Glyph::Hill {
+            base,
+            half_width,
+            height,
+        } => {
             let mut points = Vec::with_capacity(7);
             for k in 0..=6 {
                 let u = k as f32 / 6.0;
@@ -353,7 +421,12 @@ fn draw_glyph(canvas: &mut Canvas, glyph: &Glyph, s: f32) {
             match kind {
                 Biome::BorealForest => {
                     let (top, base_y, hw) = (at[1] - 2.0 * s, at[1] + 0.8 * s, 1.0 * s);
-                    canvas.triangle([at[0] - hw, base_y], [at[0], top], [at[0] + hw, base_y], FOREST_FILL);
+                    canvas.triangle(
+                        [at[0] - hw, base_y],
+                        [at[0], top],
+                        [at[0] + hw, base_y],
+                        FOREST_FILL,
+                    );
                     canvas.line([at[0] - hw, base_y], [at[0], top], 0.35 * s, INK, 0.9);
                     canvas.line([at[0], top], [at[0] + hw, base_y], 0.35 * s, INK, 0.9);
                     trunk(canvas, base_y, base_y + 0.7 * s);
@@ -398,7 +471,12 @@ fn age(canvas: &mut Canvas, s: f32) {
 fn frame(canvas: &mut Canvas, s: f32) {
     let (w, h) = (canvas.width as f32, canvas.height as f32);
     for (inset, width) in [(3.0 * s, 0.9 * s), (5.0 * s, 0.45 * s)] {
-        let (a, b, c, d) = ([inset, inset], [w - inset, inset], [w - inset, h - inset], [inset, h - inset]);
+        let (a, b, c, d) = (
+            [inset, inset],
+            [w - inset, inset],
+            [w - inset, h - inset],
+            [inset, h - inset],
+        );
         for (p, q) in [(a, b), (b, c), (c, d), (d, a)] {
             canvas.line(p, q, width, INK, 0.9);
         }
@@ -425,7 +503,10 @@ mod tests {
         let world = small_world();
         let canvas = AntiqueStyle { scale: 2 }.render(&world);
         assert_eq!((canvas.width, canvas.height), (192, 192));
-        assert!(canvas.pixels.iter().all(|p| p.iter().all(|v| v.is_finite())));
+        assert!(canvas
+            .pixels
+            .iter()
+            .all(|p| p.iter().all(|v| v.is_finite())));
     }
 
     #[test]

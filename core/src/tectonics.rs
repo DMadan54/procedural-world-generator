@@ -233,7 +233,13 @@ const NEIGHBOURS: [(isize, isize); 8] = [
 ];
 
 /// The first neighbouring pixel (in a fixed order) on a different plate.
-fn other_plate_nearby(plate_id: &[u16], width: usize, height: usize, x: usize, y: usize) -> Option<u16> {
+fn other_plate_nearby(
+    plate_id: &[u16],
+    width: usize,
+    height: usize,
+    x: usize,
+    y: usize,
+) -> Option<u16> {
     let own = plate_id[y * width + x];
     NEIGHBOURS.iter().find_map(|&(dx, dy)| {
         let nx = x.checked_add_signed(dx).filter(|&v| v < width)?;
@@ -385,8 +391,14 @@ pub fn boundary_stress(
     other: PlateKind,
 ) -> Stress {
     use PlateKind::{Continental, Oceanic};
-    let wide = |v: f32| Stress { wide: v, narrow: 0.0 };
-    let narrow = |v: f32| Stress { wide: 0.0, narrow: v };
+    let wide = |v: f32| Stress {
+        wide: v,
+        narrow: 0.0,
+    };
+    let narrow = |v: f32| Stress {
+        wide: 0.0,
+        narrow: v,
+    };
     match kind {
         BoundaryKind::Convergent => {
             let s = convergence.clamp(0.0, 1.5);
@@ -524,7 +536,10 @@ mod tests {
         let mut other = config(4, 12);
         other.noise.octaves = 2;
         other.blend.tectonic_weight = 0.2;
-        assert_eq!(generate_tectonics(&config(4, 12)), generate_tectonics(&other));
+        assert_eq!(
+            generate_tectonics(&config(4, 12)),
+            generate_tectonics(&other)
+        );
     }
 
     #[test]
@@ -566,7 +581,10 @@ mod tests {
             let n = land.len() as f32;
             let cx = land.iter().map(|p| p[0]).sum::<f32>() / n / W as f32;
             let cy = land.iter().map(|p| p[1]).sum::<f32>() / n / H as f32;
-            assert!((0.2..0.8).contains(&cx) && (0.2..0.8).contains(&cy), "seed {seed}: ({cx}, {cy})");
+            assert!(
+                (0.2..0.8).contains(&cx) && (0.2..0.8).contains(&cy),
+                "seed {seed}: ({cx}, {cy})"
+            );
         }
     }
 
@@ -646,5 +664,4 @@ mod tests {
         let c = boundary_stress(BoundaryKind::Convergent, 1.0, C, C);
         assert!(t.wide.abs() + t.narrow.abs() < 0.1 * c.wide);
     }
-
 }

@@ -128,7 +128,8 @@ pub struct Hydrology {
 impl Hydrology {
     /// The river segment through a cell, if any.
     pub fn segment_at(&self, x: usize, y: usize) -> Option<&RiverSegment> {
-        self.segments.get(self.segment_id[y * self.width + x] as usize)
+        self.segments
+            .get(self.segment_id[y * self.width + x] as usize)
     }
 
     /// The lake covering a cell, if any.
@@ -160,7 +161,11 @@ impl Ord for Key {
 }
 
 /// Runs the hydrology stage over the final terrain and climate.
-pub fn generate_hydrology(config: &WorldConfig, terrain: &Heightmap, climate: &Climate) -> Hydrology {
+pub fn generate_hydrology(
+    config: &WorldConfig,
+    terrain: &Heightmap,
+    climate: &Climate,
+) -> Hydrology {
     let (w, h) = (terrain.width, terrain.height);
     let sea = config.terrain.sea_level;
     let params = &config.hydrology;
@@ -208,7 +213,11 @@ pub fn generate_hydrology(config: &WorldConfig, terrain: &Heightmap, climate: &C
         }
         let mut best = (0.0f32, NO_FLOW);
         for (d, n) in neighbours(i) {
-            let distance = if d % 2 == 0 { 1.0 } else { std::f32::consts::SQRT_2 };
+            let distance = if d % 2 == 0 {
+                1.0
+            } else {
+                std::f32::consts::SQRT_2
+            };
             let slope = (filled[i] - filled[n]) / distance;
             if slope > best.0 {
                 best = (slope, d as u8);
@@ -227,7 +236,13 @@ pub fn generate_hydrology(config: &WorldConfig, terrain: &Heightmap, climate: &C
     let mut order: Vec<usize> = (0..w * h).filter(|&i| !ocean[i]).collect();
     order.sort_by(|&a, &b| filled[b].total_cmp(&filled[a]).then(a.cmp(&b)));
     let mut accumulation: Vec<f32> = (0..w * h)
-        .map(|i| if ocean[i] { 0.0 } else { climate.precipitation[i].max(0.0) / 1000.0 })
+        .map(|i| {
+            if ocean[i] {
+                0.0
+            } else {
+                climate.precipitation[i].max(0.0) / 1000.0
+            }
+        })
         .collect();
     for &i in &order {
         if let Some(n) = downstream(i) {
@@ -238,13 +253,30 @@ pub fn generate_hydrology(config: &WorldConfig, terrain: &Heightmap, climate: &C
     }
 
     // Lakes: connected cells whose water surface stands above the ground.
-    let (lake_id, lakes) = find_lakes(w, h, heights, &level, &ocean, params.min_lake_cells, &downstream, &accumulation);
+    let (lake_id, lakes) = find_lakes(
+        w,
+        h,
+        heights,
+        &level,
+        &ocean,
+        params.min_lake_cells,
+        &downstream,
+        &accumulation,
+    );
 
     // 4. Rivers.
     let river_cell: Vec<bool> = (0..w * h)
         .map(|i| !ocean[i] && lake_id[i] == NO_LAKE && accumulation[i] >= params.river_threshold)
         .collect();
-    let (segments, rivers, segment_id) = trace_rivers(w, h, &river_cell, &ocean, &lake_id, &accumulation, &downstream);
+    let (segments, rivers, segment_id) = trace_rivers(
+        w,
+        h,
+        &river_cell,
+        &ocean,
+        &lake_id,
+        &accumulation,
+        &downstream,
+    );
 
     Hydrology {
         width: w,
@@ -291,7 +323,8 @@ fn find_lakes(
             k += 1;
             let (x, y) = (c % w, c / w);
             for (dx, dy) in [(1isize, 0isize), (-1, 0), (0, 1), (0, -1)] {
-                let (Some(nx), Some(ny)) = (x.checked_add_signed(dx), y.checked_add_signed(dy)) else {
+                let (Some(nx), Some(ny)) = (x.checked_add_signed(dx), y.checked_add_signed(dy))
+                else {
                     continue;
                 };
                 if nx >= w || ny >= h {
@@ -317,7 +350,11 @@ fn find_lakes(
             .iter()
             .filter_map(|&c| downstream(c).map(|n| (c, n)))
             .filter(|&(_, n)| lake_id[n] != id && !ocean[n])
-            .max_by(|a, b| accumulation[a.0].total_cmp(&accumulation[b.0]).then(b.1.cmp(&a.1)))
+            .max_by(|a, b| {
+                accumulation[a.0]
+                    .total_cmp(&accumulation[b.0])
+                    .then(b.1.cmp(&a.1))
+            })
             .map(|(_, n)| [n % w, n / w]);
         lakes.push(Lake {
             id,
@@ -489,7 +526,11 @@ mod tests {
                 let valleys = 0.03 * ((x as f32 / N as f32) * std::f32::consts::TAU * 3.0).cos();
                 let (dx, dy) = (x as f32 - 32.0, y as f32 - 24.0);
                 let r = (dx * dx + dy * dy).sqrt();
-                let bowl = if r < 6.0 { -0.25 * (1.0 - r / 6.0) } else { 0.0 };
+                let bowl = if r < 6.0 {
+                    -0.25 * (1.0 - r / 6.0)
+                } else {
+                    0.0
+                };
                 data[y * N + x] = (slope + valleys + bowl).clamp(0.0, 1.0);
             }
         }
@@ -573,7 +614,10 @@ mod tests {
         assert!(!hy.segments.is_empty());
         for (i, s) in hy.segments.iter().enumerate() {
             assert_eq!(s.points.len(), s.discharge.len());
-            assert!(s.discharge.windows(2).all(|d| d[1] >= d[0] - 1e-4), "segment {i}");
+            assert!(
+                s.discharge.windows(2).all(|d| d[1] >= d[0] - 1e-4),
+                "segment {i}"
+            );
             if let RiverEnd::Junction(next) = s.end {
                 let next = &hy.segments[next as usize];
                 assert_eq!(s.points.last(), next.points.first());

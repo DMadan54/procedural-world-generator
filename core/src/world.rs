@@ -241,7 +241,8 @@ mod tests {
             c.tectonics.mountain_scale = mountains;
             let w = World::generate(&c);
             let sea = c.terrain.sea_level;
-            w.heightmap.data.iter().filter(|&&h| h >= sea).count() as f32 / w.heightmap.data.len() as f32
+            w.heightmap.data.iter().filter(|&&h| h >= sea).count() as f32
+                / w.heightmap.data.len() as f32
         };
         let (low, high) = (land_share(1.0), land_share(2.0));
         assert!(high >= low * 0.85, "land {low} at 1.0 vs {high} at 2.0");
@@ -326,7 +327,7 @@ mod tests {
                 only(|r| {
                     r.climate = true;
                     r.hydrology = true;
-                r.biomes = true;
+                    r.biomes = true;
                 })
             );
             assert!(world.is_ready(), "climate-only changes finish immediately");
