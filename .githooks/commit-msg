@@ -1,0 +1,15 @@
+#!/bin/sh
+# Rejects commit messages that carry AI attribution of any kind.
+# Enable once per clone with: git config core.hooksPath .githooks
+
+msg_file="$1"
+pattern='co-authored-by|generated with|claude-session|claude\.ai|anthropic\.com'
+
+# Ignore comment lines git adds to the message template.
+matches=$(grep -v '^#' "$msg_file" | grep -inE "$pattern")
+if [ -n "$matches" ]; then
+    echo "commit-msg: rejected, the message contains attribution:" >&2
+    echo "$matches" | sed 's/^/  line /' >&2
+    exit 1
+fi
+exit 0

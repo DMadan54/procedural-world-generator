@@ -46,7 +46,8 @@ and travel in share links, but no stage uses them yet.
 
 ## Running it
 
-You need a Rust toolchain ([rustup](https://rustup.rs)).
+You need a Rust toolchain ([rustup](https://rustup.rs)). After cloning, enable
+the repo's git hooks once with `git config core.hooksPath .githooks`.
 
 ```sh
 # Desktop app
