@@ -1,7 +1,15 @@
 //! The generation pipeline: runs each stage in order from one [`WorldConfig`].
+//!
+//! Stages: tectonics and noise (independent) → blended heightmap → erosion →
+//! climate. Erosion can take seconds, so besides the blocking
+//! [`World::generate`] and [`World::update`] there is an incremental path:
+//! [`World::set_config`] runs the cheap stages straight away and queues
+//! erosion and everything after it, and [`World::advance`] does the queued
+//! work a little at a time. Both paths give identical worlds.
 
 use crate::climate::{generate_climate, Climate};
 use crate::config::WorldConfig;
+use crate::erosion::{erode, ErosionJob};
 use crate::fractal::fbm_field;
 use crate::heightmap::{blend_heightmap, Heightmap};
 use crate::tectonics::{generate_tectonics, TectonicMap};
@@ -14,18 +22,30 @@ pub struct World {
     pub tectonics: TectonicMap,
     /// Stage: raw fractal noise.
     pub noise: Vec<f32>,
-    /// Stage: tectonics and noise blended and normalised.
+    /// Stage: tectonics and noise blended and normalised, before erosion.
     pub heightmap: Heightmap,
+    /// Stage: the heightmap after hydraulic erosion. Later stages build on
+    /// this.
+    pub terrain: Heightmap,
     /// Stage: temperature, wind and precipitation.
     pub climate: Climate,
+    /// Work queued by `set_config` and not yet done by `advance`.
+    pending: Pending,
 }
 
-/// Which stages an [`World::update`] re-ran.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Pending {
+    erosion: Option<ErosionJob>,
+    climate: bool,
+}
+
+/// Which stages a config change re-ran or queued.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct StagesRun {
     pub tectonics: bool,
     pub noise: bool,
     pub heightmap: bool,
+    pub erosion: bool,
     pub climate: bool,
 }
 
@@ -34,19 +54,32 @@ impl World {
         let tectonics = generate_tectonics(config);
         let noise = fbm_field(config);
         let heightmap = blend_heightmap(config, &tectonics, &noise);
-        let climate = generate_climate(config, &heightmap);
+        let terrain = erode(config, &heightmap);
+        let climate = generate_climate(config, &terrain);
         Self {
             config: config.clone(),
             tectonics,
             noise,
             heightmap,
+            terrain,
             climate,
+            pending: Pending::default(),
         }
     }
 
-    /// Moves to a new config, re-running only the stages whose inputs changed.
-    /// The result is always identical to `World::generate(config)`.
+    /// Moves to a new config and finishes all the work. The result is always
+    /// identical to `World::generate(config)`.
     pub fn update(&mut self, config: &WorldConfig) -> StagesRun {
+        let run = self.set_config(config);
+        self.finish();
+        run
+    }
+
+    /// Moves to a new config: re-runs the cheap stages whose inputs changed
+    /// now and queues erosion and later stages for [`World::advance`]. Safe to
+    /// call again before the queued work is done; it restarts only what the
+    /// new change affects.
+    pub fn set_config(&mut self, config: &WorldConfig) -> StagesRun {
         let old = &self.config;
         let shared = config.generator_version != old.generator_version
             || config.seed != old.seed
@@ -55,28 +88,73 @@ impl World {
         let tectonics = shared || config.tectonics != old.tectonics;
         let noise = shared || config.noise != old.noise;
         let heightmap = tectonics || noise || config.blend != old.blend;
-        let climate = heightmap || config.terrain != old.terrain || config.climate != old.climate;
+        let erosion = heightmap || config.erosion != old.erosion;
+        let climate = erosion
+            || self.pending.erosion.is_some()
+            || config.terrain != old.terrain
+            || config.climate != old.climate;
         let run = StagesRun {
             tectonics,
             noise,
             heightmap,
+            erosion,
             climate,
         };
 
-        if run.tectonics {
+        if tectonics {
             self.tectonics = generate_tectonics(config);
         }
-        if run.noise {
+        if noise {
             self.noise = fbm_field(config);
         }
-        if run.heightmap {
+        if heightmap {
             self.heightmap = blend_heightmap(config, &self.tectonics, &self.noise);
         }
-        if run.climate {
-            self.climate = generate_climate(config, &self.heightmap);
+        if erosion {
+            self.pending.erosion = Some(ErosionJob::new(config, &self.heightmap));
         }
+        self.pending.climate |= climate;
         self.config = config.clone();
+        // Without erosion to wait for, the rest is quick: do it now.
+        if self.pending.erosion.is_none() {
+            self.advance(0);
+        }
         run
+    }
+
+    /// Does up to `max_erosion_rounds` rounds of queued erosion, then any
+    /// later stages once erosion is done. Returns true when the world is
+    /// fully up to date.
+    pub fn advance(&mut self, max_erosion_rounds: usize) -> bool {
+        if let Some(job) = &mut self.pending.erosion {
+            job.step(max_erosion_rounds);
+            if !job.is_done() {
+                return false;
+            }
+            let job = self.pending.erosion.take().expect("checked above");
+            self.terrain = job.finish();
+            self.pending.climate = true;
+        }
+        if self.pending.climate {
+            self.climate = generate_climate(&self.config, &self.terrain);
+            self.pending.climate = false;
+        }
+        true
+    }
+
+    /// Does all queued work.
+    pub fn finish(&mut self) {
+        while !self.advance(usize::MAX) {}
+    }
+
+    /// True when no work is queued.
+    pub fn is_ready(&self) -> bool {
+        self.pending == Pending::default()
+    }
+
+    /// Progress of the queued erosion run, if one is in progress.
+    pub fn erosion_progress(&self) -> Option<f32> {
+        self.pending.erosion.as_ref().map(ErosionJob::progress)
     }
 }
 
@@ -85,12 +163,14 @@ mod tests {
     use super::*;
 
     fn small(seed: u64) -> WorldConfig {
-        WorldConfig {
+        let mut config = WorldConfig {
             seed,
             width: 80,
             height: 64,
             ..Default::default()
-        }
+        };
+        config.erosion.droplets = 6000;
+        config
     }
 
     fn only(f: impl FnOnce(&mut StagesRun)) -> StagesRun {
@@ -107,8 +187,8 @@ mod tests {
     #[test]
     fn different_seeds_differ() {
         assert_ne!(
-            World::generate(&small(42)).heightmap,
-            World::generate(&small(43)).heightmap
+            World::generate(&small(42)).terrain,
+            World::generate(&small(43)).terrain
         );
     }
 
@@ -122,6 +202,17 @@ mod tests {
     }
 
     #[test]
+    fn erosion_changes_terrain_but_not_heightmap() {
+        let mut no_erosion = small(42);
+        no_erosion.erosion.droplets = 0;
+        let a = World::generate(&small(42));
+        let b = World::generate(&no_erosion);
+        assert_eq!(a.heightmap, b.heightmap);
+        assert_ne!(a.terrain, b.terrain);
+        assert_eq!(b.terrain, b.heightmap);
+    }
+
+    #[test]
     fn changing_plates_skips_noise() {
         let mut world = World::generate(&small(42));
         let mut config = small(42);
@@ -132,6 +223,7 @@ mod tests {
             only(|r| {
                 r.tectonics = true;
                 r.heightmap = true;
+                r.erosion = true;
                 r.climate = true;
             })
         );
@@ -139,15 +231,15 @@ mod tests {
     }
 
     #[test]
-    fn changing_blend_reruns_heightmap_and_climate() {
+    fn changing_erosion_skips_earlier_stages() {
         let mut world = World::generate(&small(42));
         let mut config = small(42);
-        config.blend.noise_weight = 0.2;
+        config.erosion.inertia = 0.3;
         let run = world.update(&config);
         assert_eq!(
             run,
             only(|r| {
-                r.heightmap = true;
+                r.erosion = true;
                 r.climate = true;
             })
         );
@@ -163,20 +255,64 @@ mod tests {
             let mut world = World::generate(&small(42));
             let mut config = small(42);
             change(&mut config);
-            assert_eq!(world.update(&config), only(|r| r.climate = true));
+            assert_eq!(world.set_config(&config), only(|r| r.climate = true));
+            assert!(world.is_ready(), "climate-only changes finish immediately");
             assert_eq!(world, World::generate(&config));
         }
     }
 
     #[test]
-    fn climate_settings_never_change_the_terrain() {
+    fn later_settings_never_change_earlier_output() {
         let base = World::generate(&small(42));
         let mut config = small(42);
         config.climate.global_temperature_offset = 12.0;
-        config.climate.evaporation = 0.3;
+        config.erosion.droplets = 100;
         let changed = World::generate(&config);
         assert_eq!(base.tectonics, changed.tectonics);
+        assert_eq!(base.noise, changed.noise);
         assert_eq!(base.heightmap, changed.heightmap);
+    }
+
+    #[test]
+    fn incremental_matches_blocking() {
+        let mut world = World::generate(&small(42));
+        let mut config = small(42);
+        config.erosion.droplets = 9000;
+        world.set_config(&config);
+        assert!(!world.is_ready());
+        let mut last = world.erosion_progress().unwrap();
+        while !world.advance(1) {
+            let now = world.erosion_progress().unwrap();
+            assert!(now > last);
+            last = now;
+        }
+        assert!(world.is_ready());
+        assert_eq!(world, World::generate(&config));
+    }
+
+    #[test]
+    fn changing_config_mid_erosion_still_matches() {
+        let mut world = World::generate(&small(42));
+        let mut first = small(42);
+        first.erosion.droplets = 9000;
+        world.set_config(&first);
+        world.advance(1);
+        // Now a climate-only change: erosion must carry on, not be lost.
+        let mut second = first.clone();
+        second.climate.global_temperature_offset = 5.0;
+        world.set_config(&second);
+        assert!(!world.is_ready());
+        world.finish();
+        assert_eq!(world, World::generate(&second));
+
+        // And an upstream change restarts erosion from the new heightmap.
+        world.set_config(&first);
+        world.advance(1);
+        let mut third = first.clone();
+        third.tectonics.plate_count = 25;
+        world.set_config(&third);
+        world.finish();
+        assert_eq!(world, World::generate(&third));
     }
 
     #[test]

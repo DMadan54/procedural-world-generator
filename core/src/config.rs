@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Bump when a change makes existing configs produce different worlds (new
 /// RNG derivation, changed algorithm or defaults), so saved configs can be
 /// detected as coming from an older generator.
-pub const GENERATOR_VERSION: u32 = 1;
+pub const GENERATOR_VERSION: u32 = 2;
 
 pub const MIN_PLATES: usize = 8;
 pub const MAX_PLATES: usize = 40;
@@ -25,6 +25,7 @@ pub struct WorldConfig {
     pub noise: NoiseConfig,
     pub blend: BlendConfig,
     pub terrain: TerrainConfig,
+    pub erosion: ErosionConfig,
     pub climate: ClimateConfig,
 }
 
@@ -39,6 +40,7 @@ impl Default for WorldConfig {
             noise: NoiseConfig::default(),
             blend: BlendConfig::default(),
             terrain: TerrainConfig::default(),
+            erosion: ErosionConfig::default(),
             climate: ClimateConfig::default(),
         }
     }
@@ -59,6 +61,52 @@ impl Default for TerrainConfig {
         Self {
             sea_level: 0.45,
             max_elevation_m: 6000.0,
+        }
+    }
+}
+
+pub const MAX_DROPLETS: u32 = 1_000_000;
+
+/// Droplet-based hydraulic erosion. Heights are in normalised units.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ErosionConfig {
+    /// Number of droplets simulated, up to `MAX_DROPLETS`. 0 disables erosion.
+    pub droplets: u32,
+    /// Share of spare sediment capacity a droplet erodes per step.
+    pub erosion_rate: f32,
+    /// Share of excess sediment a droplet drops per step.
+    pub deposition_rate: f32,
+    /// Share of a droplet's water lost per step.
+    pub evaporation: f32,
+    /// How much a droplet keeps its direction rather than following the
+    /// slope, `0.0..1.0`.
+    pub inertia: f32,
+    /// Sediment carried per unit of slope, speed and water.
+    pub sediment_capacity: f32,
+    /// Floor on capacity so droplets on gentle slopes still erode a little.
+    pub min_sediment_capacity: f32,
+    /// Acceleration down slopes.
+    pub gravity: f32,
+    /// Maximum steps per droplet.
+    pub max_lifetime: u32,
+    /// Radius in pixels over which a droplet erodes.
+    pub brush_radius: u32,
+}
+
+impl Default for ErosionConfig {
+    fn default() -> Self {
+        Self {
+            droplets: 100_000,
+            erosion_rate: 0.3,
+            deposition_rate: 0.3,
+            evaporation: 0.01,
+            inertia: 0.05,
+            sediment_capacity: 4.0,
+            min_sediment_capacity: 0.01,
+            gravity: 4.0,
+            max_lifetime: 30,
+            brush_radius: 3,
         }
     }
 }

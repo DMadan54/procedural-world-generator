@@ -11,6 +11,12 @@ license.workspace = true
 noise.workspace = true
 rand_chacha.workspace = true
 serde.workspace = true
+rayon = { workspace = true, optional = true }
+
+[features]
+# Simulate erosion chunks on all cores. Output is identical either way.
+# Not available on wasm32-unknown-unknown, which has no threads.
+parallel = ["dep:rayon"]
 
 [dev-dependencies]
 serde_json.workspace = true

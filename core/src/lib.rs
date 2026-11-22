@@ -10,10 +10,12 @@
 //! config always produces the same world, and toggling a later stage never
 //! changes an earlier one.
 //!
-//! Pipeline: tectonics and noise (independent) → blended heightmap → climate.
+//! Pipeline: tectonics and noise (independent) → blended heightmap → erosion
+//! → climate.
 
 pub mod climate;
 pub mod config;
+pub mod erosion;
 mod field;
 pub mod fractal;
 pub mod heightmap;
@@ -23,7 +25,7 @@ pub mod world;
 
 pub use climate::Climate;
 pub use config::{
-    WorldConfig, GENERATOR_VERSION, MAX_PLATES, MAX_TEMPERATURE_OFFSET, MIN_PLATES,
+    WorldConfig, GENERATOR_VERSION, MAX_DROPLETS, MAX_PLATES, MAX_TEMPERATURE_OFFSET, MIN_PLATES,
     MIN_TEMPERATURE_OFFSET,
 };
 pub use heightmap::Heightmap;

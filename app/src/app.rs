@@ -1,8 +1,18 @@
 use eframe::egui::{self, Color32, ColorImage, Rect, Stroke, TextureHandle, TextureOptions};
 use worldgen_core::{
-    BoundaryKind, PlateKind, World, WorldConfig, MAX_PLATES, MAX_TEMPERATURE_OFFSET, MIN_PLATES,
-    MIN_TEMPERATURE_OFFSET,
+    BoundaryKind, Heightmap, PlateKind, World, WorldConfig, MAX_DROPLETS, MAX_PLATES,
+    MAX_TEMPERATURE_OFFSET, MIN_PLATES, MIN_TEMPERATURE_OFFSET,
 };
+
+/// Erosion rounds (4096 droplets each) to run per frame while erosion is in
+/// progress: enough to finish quickly, few enough to keep the UI responsive.
+#[cfg(not(target_arch = "wasm32"))]
+const EROSION_ROUNDS_PER_FRAME: usize = 6;
+#[cfg(target_arch = "wasm32")]
+const EROSION_ROUNDS_PER_FRAME: usize = 1;
+
+/// Height change at which the erosion-change view saturates.
+const EROSION_CHANGE_SCALE: f32 = 0.04;
 
 use crate::render::{self, Rgb};
 
@@ -19,6 +29,8 @@ enum DebugView {
     Noise,
     /// Final heightmap in greyscale.
     Heightmap,
+    /// Erosion stage: where material was removed and deposited.
+    ErosionChange,
     /// Climate stage: mean temperature.
     Temperature,
     /// Climate stage: annual precipitation.
@@ -28,12 +40,13 @@ enum DebugView {
 }
 
 impl DebugView {
-    const ALL: [DebugView; 8] = [
+    const ALL: [DebugView; 9] = [
         DebugView::Terrain,
         DebugView::Plates,
         DebugView::TectonicRelief,
         DebugView::Noise,
         DebugView::Heightmap,
+        DebugView::ErosionChange,
         DebugView::Temperature,
         DebugView::Precipitation,
         DebugView::Wind,
@@ -46,6 +59,7 @@ impl DebugView {
             DebugView::TectonicRelief => "Tectonic relief",
             DebugView::Noise => "Fractal noise",
             DebugView::Heightmap => "Heightmap (greyscale)",
+            DebugView::ErosionChange => "Erosion change",
             DebugView::Temperature => "Temperature",
             DebugView::Precipitation => "Precipitation",
             DebugView::Wind => "Prevailing winds",
@@ -60,6 +74,8 @@ pub struct WorldGenApp {
     seed_text: String,
     seed_error: Option<String>,
     view: DebugView,
+    /// Show the terrain as it was before erosion (Terrain and Heightmap views).
+    before_erosion: bool,
     texture: Option<TextureHandle>,
     /// Set when the image needs redrawing (new world, view or colouring).
     texture_dirty: bool,
@@ -75,16 +91,39 @@ impl WorldGenApp {
             world,
             seed_error: None,
             view: DebugView::Terrain,
+            before_erosion: false,
             texture: None,
             texture_dirty: true,
         }
     }
 
     /// Brings the world up to date with `config`, re-running only what changed.
+    /// Runs cheap stages at once; erosion and later stages continue over the
+    /// next frames (see `advance_pipeline`).
     fn apply_config(&mut self) {
-        let run = self.world.update(&self.config);
+        let run = self.world.set_config(&self.config);
         if run != Default::default() {
             self.texture_dirty = true;
+        }
+    }
+
+    /// Continues queued erosion a few rounds per frame.
+    fn advance_pipeline(&mut self, ctx: &egui::Context) {
+        if self.world.is_ready() {
+            return;
+        }
+        if self.world.advance(EROSION_ROUNDS_PER_FRAME) {
+            self.texture_dirty = true;
+        }
+        ctx.request_repaint();
+    }
+
+    /// The terrain to show: eroded, or the pre-erosion heightmap.
+    fn shown_terrain(&self) -> &Heightmap {
+        if self.before_erosion {
+            &self.world.heightmap
+        } else {
+            &self.world.terrain
         }
     }
 
@@ -107,15 +146,20 @@ impl WorldGenApp {
     fn render_view(&self) -> ColorImage {
         let (w, h) = (self.world.config.width, self.world.config.height);
         let sea = self.world.config.terrain.sea_level;
-        let (map, climate) = (&self.world.heightmap, &self.world.climate);
+        let (map, climate) = (&self.world.terrain, &self.world.climate);
         match self.view {
-            DebugView::Terrain => render::hypsometric(map, sea),
+            DebugView::Terrain => render::hypsometric(self.shown_terrain(), sea),
             DebugView::Plates => render::plates(&self.world.tectonics),
             DebugView::TectonicRelief => {
                 render::stretched_greyscale(w, h, &self.world.tectonics.elevation)
             }
             DebugView::Noise => render::stretched_greyscale(w, h, &self.world.noise),
-            DebugView::Heightmap => render::greyscale(map),
+            DebugView::Heightmap => render::greyscale(self.shown_terrain()),
+            DebugView::ErosionChange => render::erosion_change(
+                &self.world.heightmap,
+                &self.world.terrain,
+                EROSION_CHANGE_SCALE,
+            ),
             DebugView::Temperature => render::temperature(climate, map, sea),
             DebugView::Precipitation => render::precipitation(climate, map, sea),
             DebugView::Wind => render::wind_background(map, sea),
@@ -201,6 +245,9 @@ impl WorldGenApp {
             self.apply_config();
         }
 
+        ui.add_space(6.0);
+        self.erosion_controls(ui);
+
         ui.add_space(12.0);
         ui.separator();
         ui.label("Debug view");
@@ -217,9 +264,31 @@ impl WorldGenApp {
             self.texture_dirty = true;
         }
 
+        if matches!(self.view, DebugView::Terrain | DebugView::Heightmap) {
+            let toggle = ui
+                .checkbox(&mut self.before_erosion, "Show before erosion (B)")
+                .changed();
+            let key = ui.input(|i| i.key_pressed(egui::Key::B))
+                && !ui.ctx().wants_keyboard_input();
+            if key {
+                self.before_erosion = !self.before_erosion;
+            }
+            if toggle || key {
+                self.texture_dirty = true;
+            }
+        }
+
         ui.add_space(8.0);
         match self.view {
             DebugView::Plates => self.plate_legend(ui),
+            DebugView::ErosionChange => {
+                legend_row(ui, [220, 50, 40], "Eroded");
+                legend_row(ui, [40, 110, 230], "Deposited");
+                ui.weak(format!(
+                    "Full colour at a change of {:.0}% of the height range.",
+                    EROSION_CHANGE_SCALE * 100.0
+                ));
+            }
             DebugView::Temperature => {
                 for (value, colour) in render::TEMPERATURE_SCALE {
                     legend_row(ui, colour, &format!("{value:.0} °C"));
@@ -242,6 +311,35 @@ impl WorldGenApp {
             "Seed {} at {}×{}",
             self.world.config.seed, self.world.config.width, self.world.config.height
         ));
+    }
+
+    fn erosion_controls(&mut self, ui: &mut egui::Ui) {
+        let e = &mut self.config.erosion;
+        ui.label("Erosion droplets");
+        let mut changed = ui
+            .add(egui::Slider::new(&mut e.droplets, 0..=MAX_DROPLETS).logarithmic(true))
+            .changed();
+        egui::CollapsingHeader::new("Erosion settings").show(ui, |ui| {
+            let slider = |ui: &mut egui::Ui, label: &str, value: &mut f32, max: f32| {
+                ui.label(label);
+                ui.add(egui::Slider::new(value, 0.0..=max).fixed_decimals(3))
+                    .changed()
+            };
+            changed |= slider(ui, "Erosion rate", &mut e.erosion_rate, 1.0);
+            changed |= slider(ui, "Deposition rate", &mut e.deposition_rate, 1.0);
+            changed |= slider(ui, "Evaporation", &mut e.evaporation, 0.1);
+            changed |= slider(ui, "Inertia", &mut e.inertia, 0.99);
+        });
+        if changed {
+            self.apply_config();
+        }
+        if let Some(progress) = self.world.erosion_progress() {
+            ui.add(
+                egui::ProgressBar::new(progress)
+                    .text(format!("Eroding… {:.0}%", progress * 100.0))
+                    .animate(true),
+            );
+        }
     }
 
     fn plate_legend(&self, ui: &mut egui::Ui) {
@@ -288,6 +386,11 @@ impl WorldGenApp {
                 DebugView::Plates => self.draw_drift_arrows(ui.painter(), rect),
                 DebugView::Wind => self.draw_wind_arrows(ui.painter(), rect),
                 _ => {}
+            }
+            if self.before_erosion && matches!(self.view, DebugView::Terrain | DebugView::Heightmap) {
+                badge(ui.painter(), rect, "Before erosion");
+            } else if let Some(progress) = self.world.erosion_progress() {
+                badge(ui.painter(), rect, &format!("Eroding… {:.0}%", progress * 100.0));
             }
         });
     }
@@ -340,6 +443,19 @@ impl WorldGenApp {
     }
 }
 
+/// A small label in the top-left corner of the map.
+fn badge(painter: &egui::Painter, rect: Rect, text: &str) {
+    let galley = painter.layout_no_wrap(
+        text.to_owned(),
+        egui::FontId::proportional(14.0),
+        Color32::WHITE,
+    );
+    let pos = rect.min + egui::vec2(10.0, 10.0);
+    let bg = Rect::from_min_size(pos, galley.size()).expand(6.0);
+    painter.rect_filled(bg, 4.0_f32, Color32::from_black_alpha(170));
+    painter.galley(pos, galley, Color32::WHITE);
+}
+
 fn legend_row(ui: &mut egui::Ui, colour: Rgb, label: &str) {
     ui.horizontal(|ui| {
         let (swatch, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
@@ -353,6 +469,7 @@ fn legend_row(ui: &mut egui::Ui, colour: Rgb, label: &str) {
 
 impl eframe::App for WorldGenApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.advance_pipeline(ctx);
         self.side_panel(ctx);
         self.central_panel(ctx);
     }

@@ -33,6 +33,26 @@ pub fn precipitation(climate: &Climate, map: &Heightmap, sea_level: f32) -> Colo
     scaled_field(&climate.precipitation, &PRECIPITATION_SCALE, map, sea_level)
 }
 
+/// What erosion changed: red where material was removed, blue where it was
+/// deposited, over the eroded terrain in grey. Colour saturates at a change
+/// of `scale` (normalised height units).
+pub fn erosion_change(before: &Heightmap, after: &Heightmap, scale: f32) -> ColorImage {
+    const ERODED: Rgb = [220, 50, 40];
+    const DEPOSITED: Rgb = [40, 110, 230];
+    let rgb: Vec<u8> = before
+        .data
+        .iter()
+        .zip(&after.data)
+        .flat_map(|(&b, &a)| {
+            let grey = [(60.0 + a.clamp(0.0, 1.0) * 150.0) as u8; 3];
+            let d = a - b;
+            let t = (d.abs() / scale.max(1e-9)).min(1.0);
+            lerp(grey, if d < 0.0 { ERODED } else { DEPOSITED }, t)
+        })
+        .collect();
+    ColorImage::from_rgb([after.width, after.height], &rgb)
+}
+
 /// Muted terrain to draw wind arrows over.
 pub fn wind_background(map: &Heightmap, sea_level: f32) -> ColorImage {
     let rgb: Vec<u8> = map
