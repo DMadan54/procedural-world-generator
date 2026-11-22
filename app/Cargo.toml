@@ -18,4 +18,4 @@ worldgen-core = { workspace = true, features = ["parallel"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Document", "Window", "Element", "HtmlCanvasElement"] }
+web-sys = { version = "0.3", features = ["Document", "Window", "Element", "HtmlCanvasElement", "Location", "History"] }

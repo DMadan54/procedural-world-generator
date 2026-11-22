@@ -1,5 +1,7 @@
 mod app;
+mod link;
 mod render;
+mod setup;
 mod style;
 
 use app::WorldGenApp;

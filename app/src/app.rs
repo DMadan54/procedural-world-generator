@@ -15,7 +15,9 @@ const EROSION_ROUNDS_PER_FRAME: usize = 1;
 /// Height change at which the erosion-change view saturates.
 const EROSION_CHANGE_SCALE: f32 = 0.04;
 
+use crate::link;
 use crate::render::{self, Rgb};
+use crate::setup::SetupPanel;
 use crate::style::{all_styles, MapStyle};
 use worldgen_core::Biome;
 
@@ -84,6 +86,11 @@ pub struct WorldGenApp {
     world: World,
     seed_text: String,
     seed_error: Option<String>,
+    setup: SetupPanel,
+    /// A message for the user (a bad share link, a copied link).
+    notice: Option<String>,
+    /// The config last written to the browser address bar.
+    linked_config: Option<WorldConfig>,
     /// Finished-map styles; `style` picks one, or `None` for a debug view.
     styles: Vec<Box<dyn MapStyle>>,
     style: Option<usize>,
@@ -97,13 +104,25 @@ pub struct WorldGenApp {
 
 impl WorldGenApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let config = WorldConfig::default();
-        let world = World::generate(&config);
+        let (config, notice) = link::startup_config();
+        // Show a map straight away and erode in the background with progress,
+        // rather than blocking start-up on erosion.
+        let mut world = World::generate(&WorldConfig {
+            erosion: worldgen_core::config::ErosionConfig {
+                droplets: 0,
+                ..config.erosion.clone()
+            },
+            ..config.clone()
+        });
+        world.set_config(&config);
         Self {
             seed_text: config.seed.to_string(),
             config,
             world,
             seed_error: None,
+            setup: SetupPanel::default(),
+            notice,
+            linked_config: None,
             styles: all_styles(),
             style: Some(0),
             view: DebugView::Terrain,
@@ -203,6 +222,19 @@ impl WorldGenApp {
     fn controls(&mut self, ui: &mut egui::Ui) {
         ui.add_space(8.0);
         ui.heading("World");
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            if ui.button("World setup…").clicked() {
+                self.setup.open_with(&self.config);
+            }
+            if ui.button("Copy share link").clicked() {
+                ui.ctx().copy_text(link::link_for(&self.config));
+                self.notice = Some("Link copied to the clipboard.".into());
+            }
+        });
+        if let Some(notice) = &self.notice {
+            ui.weak(notice);
+        }
         ui.add_space(8.0);
 
         ui.label("Seed");
@@ -648,6 +680,20 @@ fn legend_row(ui: &mut egui::Ui, colour: Rgb, label: &str) {
 
 impl eframe::App for WorldGenApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(config) = self.setup.show(ctx) {
+            self.seed_text = config.seed.to_string();
+            self.seed_error = None;
+            self.notice = None;
+            self.config = config;
+            self.apply_config();
+        }
+        // Keep the web address bar pointing at this world, but not on every
+        // frame of a slider drag.
+        let dragging = ctx.input(|i| i.pointer.any_down());
+        if !dragging && self.linked_config.as_ref() != Some(&self.config) {
+            link::show_in_address_bar(&self.config);
+            self.linked_config = Some(self.config.clone());
+        }
         self.advance_pipeline(ctx);
         self.side_panel(ctx);
         self.central_panel(ctx);

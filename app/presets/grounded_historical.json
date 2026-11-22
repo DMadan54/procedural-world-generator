@@ -1,0 +1,13 @@
+{
+  "tectonics": { "plate_count": 16, "continental_fraction": 0.4, "continent_clustering": 0.0, "mountain_scale": 1.0 },
+  "magic": { "level": "none" },
+  "politics": { "target_realms": 14, "empire_formation": 0.45, "fragmentation_rate": 0.45 },
+  "disasters": {
+    "volcanoes": { "enabled": true, "per_century": 0.3 },
+    "earthquakes": { "enabled": true, "per_century": 0.8 },
+    "floods": { "enabled": true, "per_century": 2.5 },
+    "droughts": { "enabled": true, "per_century": 1.5 },
+    "plagues": { "enabled": true, "per_century": 0.6 }
+  },
+  "history": { "years": 1500 }
+}
