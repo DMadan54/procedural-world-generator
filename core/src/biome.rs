@@ -15,6 +15,7 @@ use rand_chacha::rand_core::RngCore;
 
 use crate::climate::{elevation_m, Climate};
 use crate::config::WorldConfig;
+use crate::field::slope;
 use crate::heightmap::Heightmap;
 use crate::hydrology::{Hydrology, NO_LAKE};
 use crate::rng::{stage, stage_rng, unit_f64};
@@ -249,23 +250,6 @@ pub fn generate_biomes(
         height: h,
         biome,
     }
-}
-
-/// Steepest drop from a cell to one of its four neighbours, in normalised
-/// height units per cell.
-fn slope(i: usize, w: usize, h: usize, terrain: &Heightmap) -> f32 {
-    let (x, y) = (i % w, i / w);
-    let here = terrain.data[i];
-    let mut steepest = 0.0f32;
-    for (dx, dy) in [(1isize, 0isize), (-1, 0), (0, 1), (0, -1)] {
-        let (Some(nx), Some(ny)) = (x.checked_add_signed(dx), y.checked_add_signed(dy)) else {
-            continue;
-        };
-        if nx < w && ny < h {
-            steepest = steepest.max((here - terrain.data[ny * w + nx]).abs());
-        }
-    }
-    steepest
 }
 
 /// The wetland thresholds at this map width: (max slope per cell, min flow

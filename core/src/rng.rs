@@ -22,6 +22,8 @@ pub mod stage {
     pub const EROSION: &str = "erosion";
     pub const BIOMES: &str = "biomes";
     pub const LANGUAGE: &str = "language";
+    pub const PEOPLES: &str = "peoples";
+    pub const PEOPLE_TRAITS: &str = "peoples.traits";
     pub const NAMES_PEOPLE: &str = "names.people";
     pub const NAMES_PLACE: &str = "names.place";
     pub const NAMES_PERSON: &str = "names.person";

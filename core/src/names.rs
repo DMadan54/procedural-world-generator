@@ -222,11 +222,12 @@ fn finish(candidate: &str, suffix: &str) -> String {
     }
 }
 
-/// Lowercase ASCII letters, 3–12 long, no run of 4+ consonants or 3+
-/// vowels, no letter three times in a row, and at least one vowel.
+/// Lowercase ASCII letters, 3–10 long, no run of 4+ consonants or 3+
+/// vowels, no letter three times in a row, no three-letter chunk repeated,
+/// and at least one vowel.
 pub fn is_pronounceable(word: &str) -> bool {
     let bytes = word.to_ascii_lowercase().into_bytes();
-    if !(3..=12).contains(&bytes.len()) || !bytes.iter().all(u8::is_ascii_lowercase) {
+    if !(3..=10).contains(&bytes.len()) || !bytes.iter().all(u8::is_ascii_lowercase) {
         return false;
     }
     if !bytes.iter().any(|b| VOWELS.contains(b)) {
@@ -238,6 +239,15 @@ pub fn is_pronounceable(word: &str) -> bool {
         return false;
     }
     if bytes[0] == b'y' && !VOWELS.contains(&bytes[1]) {
+        return false;
+    }
+    // A repeated chunk ("yugraungyung") reads as a stutter.
+    let triples: Vec<&[u8]> = bytes.windows(3).collect();
+    if triples
+        .iter()
+        .enumerate()
+        .any(|(i, t)| triples[i + 1..].contains(t))
+    {
         return false;
     }
     let (mut consonant_run, mut vowel_run) = (0, 0);
@@ -322,6 +332,8 @@ mod tests {
             !is_pronounceable("yjubor"),
             "y before a consonant at the start"
         );
+        assert!(!is_pronounceable("ungraungun"), "repeated chunk");
+        assert!(!is_pronounceable("wulthouxbox"), "too long");
         assert!(!is_pronounceable("ab"), "too short");
         assert!(!is_pronounceable("rkst"), "no vowel");
     }

@@ -45,10 +45,14 @@ enum DebugView {
     Drainage,
     /// Biome stage: biome per cell.
     Biomes,
+    /// Habitability stage: how good each cell is to live on.
+    Habitability,
+    /// Peoples stage: homelands, origins and names.
+    Peoples,
 }
 
 impl DebugView {
-    const ALL: [DebugView; 11] = [
+    const ALL: [DebugView; 13] = [
         DebugView::Terrain,
         DebugView::Plates,
         DebugView::TectonicRelief,
@@ -60,6 +64,8 @@ impl DebugView {
         DebugView::Wind,
         DebugView::Drainage,
         DebugView::Biomes,
+        DebugView::Habitability,
+        DebugView::Peoples,
     ];
 
     fn label(self) -> &'static str {
@@ -75,6 +81,8 @@ impl DebugView {
             DebugView::Wind => "Prevailing winds",
             DebugView::Drainage => "Drainage (flow accumulation)",
             DebugView::Biomes => "Biomes",
+            DebugView::Habitability => "Habitability",
+            DebugView::Peoples => "Peoples",
         }
     }
 }
@@ -206,6 +214,8 @@ impl WorldGenApp {
             DebugView::Wind => render::wind_background(map, sea),
             DebugView::Drainage => render::flow_accumulation(map, &self.world.hydrology, sea),
             DebugView::Biomes => render::biomes(&self.world.biomes),
+            DebugView::Habitability => render::habitability(&self.world),
+            DebugView::Peoples => render::peoples(&self.world),
         }
     }
 
@@ -376,6 +386,31 @@ impl WorldGenApp {
         };
         match debug_view {
             None => {}
+            Some(DebugView::Habitability) => {
+                for (value, colour) in render::HABITABILITY_SCALE {
+                    legend_row(ui, colour, &format!("{value:.2}"));
+                }
+            }
+            Some(DebugView::Peoples) => {
+                let total: u32 = self
+                    .world
+                    .peoples
+                    .peoples
+                    .iter()
+                    .map(|p| p.cells)
+                    .sum::<u32>()
+                    .max(1);
+                for people in &self.world.peoples.peoples {
+                    let label = format!(
+                        "{}, {} ({:.0}%)",
+                        people.name,
+                        people.trait_.name(),
+                        100.0 * people.cells as f32 / total as f32
+                    );
+                    legend_row(ui, render::people_colour(people.id), &label);
+                }
+                ui.weak("Grey land belongs to no people.");
+            }
             Some(DebugView::Biomes) => {
                 ui.weak("Share of land");
                 for (biome, share) in self.world.biomes.coverage() {
@@ -551,6 +586,7 @@ impl WorldGenApp {
             // Styled maps draw everything themselves; debug views get overlays.
             match debug_view {
                 Some(DebugView::Plates) => self.draw_drift_arrows(ui.painter(), rect),
+                Some(DebugView::Peoples) => self.draw_people_names(ui.painter(), rect),
                 Some(DebugView::Wind) => self.draw_wind_arrows(ui.painter(), rect),
                 Some(DebugView::Terrain | DebugView::Drainage) if !self.before_erosion => {
                     self.draw_rivers(ui.painter(), rect)
@@ -598,6 +634,25 @@ impl WorldGenApp {
 }
 
 impl WorldGenApp {
+    /// Each people's name at its origin, with a marker.
+    fn draw_people_names(&self, painter: &egui::Painter, rect: Rect) {
+        let p = &self.world.peoples;
+        let scale = rect.width() / p.width.max(1) as f32;
+        for people in &p.peoples {
+            let (x, y) = (people.origin % p.width, people.origin / p.width);
+            let at = rect.min + egui::vec2(x as f32 + 0.5, y as f32 + 0.5) * scale;
+            painter.circle_filled(at, 4.0_f32, Color32::BLACK);
+            painter.circle_filled(at, 2.5_f32, Color32::WHITE);
+            painter.text(
+                at + egui::vec2(0.0, -8.0),
+                egui::Align2::CENTER_BOTTOM,
+                &people.name,
+                egui::FontId::proportional(14.0),
+                Color32::BLACK,
+            );
+        }
+    }
+
     /// Rivers from the hydrology polylines, wider with more discharge.
     fn draw_rivers(&self, painter: &egui::Painter, rect: Rect) {
         let hy = &self.world.hydrology;

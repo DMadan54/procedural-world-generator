@@ -11,7 +11,7 @@
 //! changes an earlier one.
 //!
 //! Pipeline: tectonics and noise (independent) → blended heightmap → erosion
-//! → climate → hydrology → biomes.
+//! → climate → hydrology → biomes → habitability and travel cost → peoples.
 
 pub mod biome;
 pub mod climate;
@@ -19,12 +19,15 @@ pub mod config;
 pub mod erosion;
 mod field;
 pub mod fractal;
+pub mod habitability;
 pub mod heightmap;
 pub mod hydrology;
 pub mod names;
+pub mod peoples;
 pub mod rng;
 pub mod share;
 pub mod tectonics;
+pub mod travel;
 pub mod world;
 
 pub use biome::{Biome, Biomes};

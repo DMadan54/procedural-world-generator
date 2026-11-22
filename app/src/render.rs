@@ -80,6 +80,54 @@ pub fn biome_colour(biome: Biome) -> Rgb {
     }
 }
 
+/// Colour stops for habitability.
+pub const HABITABILITY_SCALE: [(f32, Rgb); 5] = [
+    (0.0, [60, 50, 45]),
+    (0.2, [140, 90, 60]),
+    (0.45, [215, 175, 90]),
+    (0.7, [150, 195, 100]),
+    (1.0, [40, 130, 70]),
+];
+
+/// Habitability on a brown-to-green ramp; water in dark blue.
+pub fn habitability(world: &worldgen_core::World) -> ColorImage {
+    let h = &world.habitability;
+    let rgb: Vec<u8> = (0..h.value.len())
+        .flat_map(|i| {
+            if world.biomes.biome[i].is_water() {
+                [25, 45, 80]
+            } else {
+                colour_scale(h.value[i], &HABITABILITY_SCALE)
+            }
+        })
+        .collect();
+    ColorImage::from_rgb([h.width, h.height], &rgb)
+}
+
+/// A distinct, fairly bright colour per people.
+pub fn people_colour(id: u16) -> Rgb {
+    let hue = (id as f32 * 0.618_034 * 360.0) % 360.0;
+    hsv(hue, 0.5, 0.85)
+}
+
+/// Peoples' homelands in flat colours over grey land and dark water.
+pub fn peoples(world: &worldgen_core::World) -> ColorImage {
+    let p = &world.peoples;
+    let rgb: Vec<u8> = (0..p.homeland.len())
+        .flat_map(|i| {
+            let owner = p.homeland[i];
+            if world.biomes.biome[i].is_water() {
+                [25, 45, 80]
+            } else if owner == worldgen_core::peoples::NO_PEOPLE {
+                [120, 115, 108]
+            } else {
+                people_colour(owner)
+            }
+        })
+        .collect();
+    ColorImage::from_rgb([p.width, p.height], &rgb)
+}
+
 /// Biomes in flat colours.
 pub fn biomes(biomes: &Biomes) -> ColorImage {
     let rgb: Vec<u8> = biomes.biome.iter().flat_map(|&b| biome_colour(b)).collect();

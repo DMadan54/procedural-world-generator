@@ -1,7 +1,7 @@
 //! The generation pipeline: runs each stage in order from one [`WorldConfig`].
 //!
 //! Stages: tectonics and noise (independent) → blended heightmap → erosion →
-//! climate → hydrology → biomes. Erosion can take seconds, so besides the blocking
+//! climate → hydrology → biomes → habitability and travel cost → peoples. Erosion can take seconds, so besides the blocking
 //! [`World::generate`] and [`World::update`] there is an incremental path:
 //! [`World::set_config`] runs the cheap stages straight away and queues
 //! erosion and everything after it, and [`World::advance`] does the queued
@@ -12,9 +12,12 @@ use crate::climate::{generate_climate, Climate};
 use crate::config::WorldConfig;
 use crate::erosion::{erode, ErosionJob};
 use crate::fractal::fbm_field;
+use crate::habitability::{generate_habitability, Habitability};
 use crate::heightmap::{blend_heightmap, Heightmap};
 use crate::hydrology::{generate_hydrology, Hydrology};
+use crate::peoples::{generate_peoples, Peoples};
 use crate::tectonics::{generate_tectonics, TectonicMap};
+use crate::travel::travel_cost_grid;
 
 /// A generated world: the config it came from plus every stage's output.
 #[derive(Clone, Debug, PartialEq)]
@@ -35,6 +38,12 @@ pub struct World {
     pub hydrology: Hydrology,
     /// Stage: biome per cell.
     pub biomes: Biomes,
+    /// Stage: how good each cell is to live on.
+    pub habitability: Habitability,
+    /// Stage: cost of entering each cell overland (see `travel`).
+    pub travel_cost: Vec<f32>,
+    /// Stage: peoples, their homelands and languages.
+    pub peoples: Peoples,
     /// Work queued by `set_config` and not yet done by `advance`.
     pending: Pending,
 }
@@ -45,6 +54,9 @@ struct Pending {
     climate: bool,
     hydrology: bool,
     biomes: bool,
+    habitability: bool,
+    travel: bool,
+    peoples: bool,
 }
 
 /// Which stages a config change re-ran or queued.
@@ -57,6 +69,9 @@ pub struct StagesRun {
     pub climate: bool,
     pub hydrology: bool,
     pub biomes: bool,
+    pub habitability: bool,
+    pub travel: bool,
+    pub peoples: bool,
 }
 
 impl World {
@@ -68,6 +83,16 @@ impl World {
         let climate = generate_climate(config, &terrain);
         let hydrology = generate_hydrology(config, &terrain, &climate);
         let biomes = generate_biomes(config, &terrain, &climate, &hydrology);
+        let habitability = generate_habitability(config, &terrain, &hydrology, &biomes);
+        let travel_cost = travel_cost_grid(config, &terrain, &hydrology, &biomes);
+        let peoples = generate_peoples(
+            config,
+            &terrain,
+            &hydrology,
+            &biomes,
+            &habitability,
+            &travel_cost,
+        );
         Self {
             config: config.clone(),
             tectonics,
@@ -77,6 +102,9 @@ impl World {
             climate,
             hydrology,
             biomes,
+            habitability,
+            travel_cost,
+            peoples,
             pending: Pending::default(),
         }
     }
@@ -110,6 +138,9 @@ impl World {
         let hydrology = climate || config.hydrology != old.hydrology;
         // Biomes read the climate, terrain and lakes, so they follow hydrology.
         let biomes = hydrology || config.biomes != old.biomes;
+        let habitability = biomes || config.habitability != old.habitability;
+        let travel = biomes || config.travel != old.travel;
+        let peoples = habitability || travel || config.peoples != old.peoples;
         let run = StagesRun {
             tectonics,
             noise,
@@ -118,6 +149,9 @@ impl World {
             climate,
             hydrology,
             biomes,
+            habitability,
+            travel,
+            peoples,
         };
 
         if tectonics {
@@ -135,6 +169,9 @@ impl World {
         self.pending.climate |= climate;
         self.pending.hydrology |= hydrology;
         self.pending.biomes |= biomes;
+        self.pending.habitability |= habitability;
+        self.pending.travel |= travel;
+        self.pending.peoples |= peoples;
         self.config = config.clone();
         // Without erosion to wait for, the rest is quick: do it now.
         if self.pending.erosion.is_none() {
@@ -170,6 +207,31 @@ impl World {
             self.biomes =
                 generate_biomes(&self.config, &self.terrain, &self.climate, &self.hydrology);
             self.pending.biomes = false;
+            self.pending.habitability = true;
+            self.pending.travel = true;
+        }
+        if self.pending.habitability {
+            self.habitability =
+                generate_habitability(&self.config, &self.terrain, &self.hydrology, &self.biomes);
+            self.pending.habitability = false;
+            self.pending.peoples = true;
+        }
+        if self.pending.travel {
+            self.travel_cost =
+                travel_cost_grid(&self.config, &self.terrain, &self.hydrology, &self.biomes);
+            self.pending.travel = false;
+            self.pending.peoples = true;
+        }
+        if self.pending.peoples {
+            self.peoples = generate_peoples(
+                &self.config,
+                &self.terrain,
+                &self.hydrology,
+                &self.biomes,
+                &self.habitability,
+                &self.travel_cost,
+            );
+            self.pending.peoples = false;
         }
         true
     }
@@ -205,9 +267,18 @@ mod tests {
         config
     }
 
+    /// The expected report: the stages `f` sets, plus every later stage that
+    /// necessarily follows them.
     fn only(f: impl FnOnce(&mut StagesRun)) -> StagesRun {
         let mut run = StagesRun::default();
         f(&mut run);
+        if run.biomes {
+            run.habitability = true;
+            run.travel = true;
+        }
+        if run.habitability || run.travel {
+            run.peoples = true;
+        }
         run
     }
 
@@ -304,6 +375,24 @@ mod tests {
         config.biomes.edge_jitter_c = 5.0;
         assert_eq!(world.set_config(&config), only(|r| r.biomes = true));
         assert!(world.is_ready());
+        assert_eq!(world, World::generate(&config));
+    }
+
+    #[test]
+    fn changing_people_settings_reruns_only_peoples() {
+        let mut world = World::generate(&small(42));
+        let mut config = small(42);
+        config.peoples.count = 4;
+        assert_eq!(world.set_config(&config), only(|r| r.peoples = true));
+        assert_eq!(world, World::generate(&config));
+    }
+
+    #[test]
+    fn changing_travel_costs_reruns_travel_and_peoples() {
+        let mut world = World::generate(&small(42));
+        let mut config = small(42);
+        config.travel.sea_cost = 30.0;
+        assert_eq!(world.set_config(&config), only(|r| r.travel = true));
         assert_eq!(world, World::generate(&config));
     }
 

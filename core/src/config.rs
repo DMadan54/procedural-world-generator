@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Bump when a change makes existing configs produce different worlds (new
 /// RNG derivation, changed algorithm or defaults), so saved configs can be
 /// detected as coming from an older generator.
-pub const GENERATOR_VERSION: u32 = 5;
+pub const GENERATOR_VERSION: u32 = 6;
 
 pub const MIN_PLATES: usize = 8;
 pub const MAX_PLATES: usize = 40;
@@ -29,6 +29,9 @@ pub struct WorldConfig {
     pub climate: ClimateConfig,
     pub hydrology: HydrologyConfig,
     pub biomes: BiomeConfig,
+    pub habitability: HabitabilityConfig,
+    pub travel: TravelConfig,
+    pub peoples: PeoplesConfig,
     pub magic: MagicConfig,
     pub politics: PoliticsConfig,
     pub disasters: DisasterConfig,
@@ -50,6 +53,9 @@ impl Default for WorldConfig {
             climate: ClimateConfig::default(),
             hydrology: HydrologyConfig::default(),
             biomes: BiomeConfig::default(),
+            habitability: HabitabilityConfig::default(),
+            travel: TravelConfig::default(),
+            peoples: PeoplesConfig::default(),
             magic: MagicConfig::default(),
             politics: PoliticsConfig::default(),
             disasters: DisasterConfig::default(),
@@ -181,6 +187,101 @@ impl Default for TerrainConfig {
 }
 
 pub const MAX_DROPLETS: u32 = 1_000_000;
+
+/// Weights for how attractive land is to live on. Radii are in cells of a
+/// 512-wide map and scale with world size.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HabitabilityConfig {
+    /// Bonus next to the biggest rivers (smaller rivers get less).
+    pub river_weight: f32,
+    pub river_radius: f32,
+    /// Bonus along lake shores.
+    pub lake_weight: f32,
+    /// Bonus for sheltered coast (bays score highest).
+    pub coast_weight: f32,
+    pub coast_radius: f32,
+    /// Penalty per unit of slope (normalised height per 512-map cell).
+    pub slope_penalty: f32,
+    /// Penalty per km of altitude.
+    pub elevation_penalty: f32,
+}
+
+impl Default for HabitabilityConfig {
+    fn default() -> Self {
+        Self {
+            river_weight: 0.35,
+            river_radius: 4.0,
+            lake_weight: 0.2,
+            coast_weight: 0.25,
+            coast_radius: 5.0,
+            slope_penalty: 40.0,
+            elevation_penalty: 0.15,
+        }
+    }
+}
+
+/// Travel cost of terrain, used wherever things move overland: peoples
+/// spreading, realms claiming land, roads and armies. Costs are per cell
+/// entered (1 is open lowland).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TravelConfig {
+    /// Crossing open sea.
+    pub sea_cost: f32,
+    pub lake_cost: f32,
+    /// Extra cost per km of altitude above 1500 m.
+    pub mountain_cost: f32,
+    /// Extra cost per unit of slope (normalised height per 512-map cell).
+    pub slope_cost: f32,
+    /// Extra cost in forest.
+    pub forest_cost: f32,
+    /// Extra cost in swamp and jungle.
+    pub swamp_cost: f32,
+    /// Extra cost in desert, tundra, ice and bare rock.
+    pub barren_cost: f32,
+    /// Multiplier along rivers, below 1 so rivers are corridors.
+    pub river_factor: f32,
+}
+
+impl Default for TravelConfig {
+    fn default() -> Self {
+        Self {
+            sea_cost: 12.0,
+            lake_cost: 6.0,
+            mountain_cost: 3.0,
+            slope_cost: 60.0,
+            forest_cost: 0.6,
+            swamp_cost: 1.5,
+            barren_cost: 2.0,
+            river_factor: 0.5,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PeoplesConfig {
+    /// How many peoples to place (fewer if the land runs out).
+    pub count: u32,
+    /// Minimum distance between origins, as a fraction of map width.
+    pub min_origin_spacing: f32,
+    /// Land below this habitability belongs to no people.
+    pub min_habitability: f32,
+    /// How far (in travel cost) a people can spread from its origin.
+    pub max_expansion_cost: f32,
+}
+
+impl Default for PeoplesConfig {
+    fn default() -> Self {
+        Self {
+            count: 8,
+            min_origin_spacing: 0.12,
+            min_habitability: 0.1,
+            max_expansion_cost: 160.0,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

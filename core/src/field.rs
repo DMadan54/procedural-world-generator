@@ -1,5 +1,32 @@
 //! Helpers for 2D scalar fields shared by several stages.
 
+use crate::heightmap::Heightmap;
+
+/// Steepest drop from a cell to one of its four neighbours, in normalised
+/// height units per cell. Multiply by `width / 512` to compare across map
+/// sizes (see [`slope_at_reference`]).
+pub(crate) fn slope(i: usize, w: usize, h: usize, terrain: &Heightmap) -> f32 {
+    let (x, y) = (i % w, i / w);
+    let here = terrain.data[i];
+    let mut steepest = 0.0f32;
+    for (dx, dy) in [(1isize, 0isize), (-1, 0), (0, 1), (0, -1)] {
+        let (Some(nx), Some(ny)) = (x.checked_add_signed(dx), y.checked_add_signed(dy)) else {
+            continue;
+        };
+        if nx < w && ny < h {
+            steepest = steepest.max((here - terrain.data[ny * w + nx]).abs());
+        }
+    }
+    steepest
+}
+
+/// [`slope`] expressed for a 512-cell-wide map, so thresholds mean the same
+/// at every world size: a coarser map's cells span more ground, so the same
+/// hillside drops more per cell.
+pub(crate) fn slope_at_reference(i: usize, w: usize, h: usize, terrain: &Heightmap) -> f32 {
+    slope(i, w, h, terrain) * w as f32 / 512.0
+}
+
 /// Approximate Gaussian blur (three box passes per axis).
 ///
 /// With `line_gain`, the result is rescaled so a boundary line (two pixels
