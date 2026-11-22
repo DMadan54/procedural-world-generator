@@ -1,20 +1,27 @@
 use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
 use worldgen_core::{generate_heightmap, Heightmap, HeightmapParams, WorldSeed};
 
-const DEFAULT_SEED: u64 = 42;
+use crate::render;
 
-/// Which pipeline stage the central panel shows. Every stage gets an entry.
+const DEFAULT_SEED: u64 = 42;
+const DEFAULT_SEA_LEVEL: f32 = 0.45;
+
+/// What the central panel shows. Every pipeline stage gets an entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DebugView {
+    /// Heightmap coloured by elevation relative to sea level.
+    Terrain,
+    /// Raw heightmap stage output in greyscale.
     Heightmap,
 }
 
 impl DebugView {
-    const ALL: [DebugView; 1] = [DebugView::Heightmap];
+    const ALL: [DebugView; 2] = [DebugView::Terrain, DebugView::Heightmap];
 
     fn label(self) -> &'static str {
         match self {
-            DebugView::Heightmap => "Heightmap",
+            DebugView::Terrain => "Terrain",
+            DebugView::Heightmap => "Heightmap (greyscale)",
         }
     }
 }
@@ -25,9 +32,12 @@ pub struct WorldGenApp {
     seed: WorldSeed,
     params: HeightmapParams,
     heightmap: Heightmap,
+    /// Display only: changing it recolours the existing heightmap.
+    sea_level: f32,
     view: DebugView,
-    /// Cleared whenever the world or view changes; rebuilt on the next frame.
     texture: Option<TextureHandle>,
+    /// Set when the image needs redrawing (new world, view or colouring).
+    texture_dirty: bool,
 }
 
 impl WorldGenApp {
@@ -41,8 +51,10 @@ impl WorldGenApp {
             seed,
             params,
             heightmap,
-            view: DebugView::Heightmap,
+            sea_level: DEFAULT_SEA_LEVEL,
+            view: DebugView::Terrain,
             texture: None,
+            texture_dirty: true,
         }
     }
 
@@ -52,17 +64,21 @@ impl WorldGenApp {
                 self.seed_error = None;
                 self.seed = WorldSeed(value);
                 self.heightmap = generate_heightmap(self.seed, &self.params);
-                self.texture = None;
+                self.texture_dirty = true;
             }
             Err(_) => {
-                self.seed_error = Some(format!("Seed must be a whole number from 0 to {}.", u64::MAX));
+                self.seed_error = Some(format!(
+                    "Seed must be a whole number from 0 to {}.",
+                    u64::MAX
+                ));
             }
         }
     }
 
     fn render_view(&self) -> ColorImage {
         match self.view {
-            DebugView::Heightmap => heightmap_image(&self.heightmap),
+            DebugView::Terrain => render::hypsometric(&self.heightmap, self.sea_level),
+            DebugView::Heightmap => render::greyscale(&self.heightmap),
         }
     }
 
@@ -97,6 +113,19 @@ impl WorldGenApp {
 
                 ui.add_space(16.0);
                 ui.separator();
+                ui.label("Sea level");
+                ui.spacing_mut().slider_width = ui.available_width() - 56.0;
+                let sea = ui.add(
+                    egui::Slider::new(&mut self.sea_level, 0.0..=1.0)
+                        .fixed_decimals(2)
+                        .step_by(0.01),
+                );
+                if sea.changed() && self.view == DebugView::Terrain {
+                    self.texture_dirty = true;
+                }
+
+                ui.add_space(16.0);
+                ui.separator();
                 ui.label("Debug view");
                 let before = self.view;
                 egui::ComboBox::from_id_salt("debug_view")
@@ -108,7 +137,7 @@ impl WorldGenApp {
                         }
                     });
                 if self.view != before {
-                    self.texture = None;
+                    self.texture_dirty = true;
                 }
 
                 ui.add_space(16.0);
@@ -120,11 +149,23 @@ impl WorldGenApp {
             });
     }
 
-    fn central_panel(&mut self, ctx: &egui::Context) {
-        if self.texture.is_none() {
-            let image = self.render_view();
-            self.texture = Some(ctx.load_texture("debug_view", image, TextureOptions::NEAREST));
+    /// Redraws the image if needed, reusing the GPU texture when it exists.
+    fn update_texture(&mut self, ctx: &egui::Context) {
+        if !self.texture_dirty && self.texture.is_some() {
+            return;
         }
+        let image = self.render_view();
+        match &mut self.texture {
+            Some(texture) => texture.set(image, TextureOptions::NEAREST),
+            None => {
+                self.texture = Some(ctx.load_texture("debug_view", image, TextureOptions::NEAREST))
+            }
+        }
+        self.texture_dirty = false;
+    }
+
+    fn central_panel(&mut self, ctx: &egui::Context) {
+        self.update_texture(ctx);
         let texture = self.texture.as_ref().expect("texture was just created");
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -145,13 +186,4 @@ impl eframe::App for WorldGenApp {
         self.side_panel(ctx);
         self.central_panel(ctx);
     }
-}
-
-fn heightmap_image(map: &Heightmap) -> ColorImage {
-    let grey: Vec<u8> = map
-        .data
-        .iter()
-        .map(|&h| (h.clamp(0.0, 1.0) * 255.0).round() as u8)
-        .collect();
-    ColorImage::from_gray([map.width, map.height], &grey)
 }
