@@ -32,9 +32,16 @@ pub struct Climate {
     pub wind: Vec<[f32; 2]>,
 }
 
-/// Latitude in degrees (north positive) at the centre of row `y`.
+/// Latitude in degrees (north positive) at the centre of row `y`, for a map
+/// spanning the whole globe.
 pub fn latitude(y: usize, height: usize) -> f32 {
-    90.0 - 180.0 * (y as f32 + 0.5) / height.max(1) as f32
+    band_latitude(y, height, 90.0, -90.0)
+}
+
+/// Latitude at the centre of row `y` for a map whose top row is at `north`
+/// and bottom row at `south`.
+pub fn band_latitude(y: usize, height: usize, north: f32, south: f32) -> f32 {
+    north + (south - north) * (y as f32 + 0.5) / height.max(1) as f32
 }
 
 /// Height above sea level in metres. The sea surface (and anything below it)
@@ -117,8 +124,9 @@ pub fn generate_climate(config: &WorldConfig, heightmap: &Heightmap) -> Climate 
 
     let mut temperature = Vec::with_capacity(width * height);
     let mut wind = Vec::with_capacity(width * height);
+    let lat_of = |y: usize| band_latitude(y, height, cfg.latitude_north, cfg.latitude_south);
     for y in 0..height {
-        let lat = latitude(y, height);
+        let lat = lat_of(y);
         let [east, north] = prevailing_wind(lat);
         for x in 0..width {
             let i = y * width + x;
@@ -171,7 +179,9 @@ fn march_parcels(
     // other resolutions.
     let step = 512.0 / width as f32;
     let blows_east: Vec<bool> = (0..height).map(|y| wind[y * width][0] >= 0.0).collect();
-    let tendency: Vec<f32> = (0..height).map(|y| rain_tendency(latitude(y, height))).collect();
+    let tendency: Vec<f32> = (0..height)
+        .map(|y| rain_tendency(band_latitude(y, height, cfg.latitude_north, cfg.latitude_south)))
+        .collect();
 
     for eastward in [true, false] {
         let columns: Vec<usize> = if eastward {
@@ -262,6 +272,17 @@ mod tests {
         assert!((latitude(0, 180) - 89.5).abs() < 1e-4);
         assert!((latitude(179, 180) + 89.5).abs() < 1e-4);
         assert!(latitude(90, 180) < 0.0 && latitude(89, 180) > 0.0);
+    }
+
+    #[test]
+    fn tropical_band_is_warmer_than_whole_globe() {
+        let map = flat_world(64, 0.3);
+        let mut tropics = WorldConfig::default();
+        tropics.climate.latitude_north = 20.0;
+        tropics.climate.latitude_south = -20.0;
+        let mean = |c: &Climate| c.temperature.iter().sum::<f32>() / c.temperature.len() as f32;
+        let globe = generate_climate(&WorldConfig::default(), &map);
+        assert!(mean(&generate_climate(&tropics, &map)) > mean(&globe) + 5.0);
     }
 
     #[test]

@@ -28,6 +28,10 @@ pub struct WorldConfig {
     pub erosion: ErosionConfig,
     pub climate: ClimateConfig,
     pub hydrology: HydrologyConfig,
+    pub magic: MagicConfig,
+    pub politics: PoliticsConfig,
+    pub disasters: DisasterConfig,
+    pub history: HistoryConfig,
 }
 
 impl Default for WorldConfig {
@@ -44,7 +48,114 @@ impl Default for WorldConfig {
             erosion: ErosionConfig::default(),
             climate: ClimateConfig::default(),
             hydrology: HydrologyConfig::default(),
+            magic: MagicConfig::default(),
+            politics: PoliticsConfig::default(),
+            disasters: DisasterConfig::default(),
+            history: HistoryConfig::default(),
         }
+    }
+}
+
+// The sections below describe the world's story. No stage reads them yet;
+// they are carried in configs, presets and share links so later stages
+// (settlements, realms, history) can use them.
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MagicLevel {
+    None,
+    Rare,
+    #[default]
+    Common,
+    Saturated,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MagicConfig {
+    pub level: MagicLevel,
+}
+
+pub const MAX_REALMS: u32 = 64;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PoliticsConfig {
+    /// Roughly how many independent realms the world should settle into.
+    pub target_realms: u32,
+    /// Tendency of realms to conquer and absorb neighbours, `0.0..=1.0`.
+    pub empire_formation: f32,
+    /// Tendency of large realms to break apart, `0.0..=1.0`.
+    pub fragmentation_rate: f32,
+}
+
+impl Default for PoliticsConfig {
+    fn default() -> Self {
+        Self {
+            target_realms: 10,
+            empire_formation: 0.4,
+            fragmentation_rate: 0.3,
+        }
+    }
+}
+
+/// One kind of disaster: whether it happens and how often.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Disaster {
+    pub enabled: bool,
+    /// Expected events per century across the world.
+    pub per_century: f32,
+}
+
+impl Default for Disaster {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            per_century: 1.0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DisasterConfig {
+    pub volcanoes: Disaster,
+    pub earthquakes: Disaster,
+    pub floods: Disaster,
+    pub droughts: Disaster,
+    pub plagues: Disaster,
+}
+
+impl Default for DisasterConfig {
+    fn default() -> Self {
+        let every = |per_century| Disaster {
+            enabled: true,
+            per_century,
+        };
+        Self {
+            volcanoes: every(0.5),
+            earthquakes: every(1.0),
+            floods: every(2.0),
+            droughts: every(1.0),
+            plagues: every(0.3),
+        }
+    }
+}
+
+pub const MIN_HISTORY_YEARS: u32 = 100;
+pub const MAX_HISTORY_YEARS: u32 = 20_000;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HistoryConfig {
+    /// Years of history to simulate.
+    pub years: u32,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self { years: 2000 }
     }
 }
 
@@ -165,6 +276,10 @@ pub struct ClimateConfig {
     pub orographic_rain: f32,
     /// Share of a parcel's moisture rained out per step regardless of terrain.
     pub base_rain: f32,
+    /// Latitude (degrees, north positive) of the top row of the map.
+    pub latitude_north: f32,
+    /// Latitude of the bottom row. With the defaults the map spans the globe.
+    pub latitude_south: f32,
 }
 
 impl Default for ClimateConfig {
@@ -178,6 +293,8 @@ impl Default for ClimateConfig {
             evaporation: 0.08,
             orographic_rain: 0.8,
             base_rain: 0.015,
+            latitude_north: 90.0,
+            latitude_south: -90.0,
         }
     }
 }
@@ -192,6 +309,12 @@ pub struct TectonicConfig {
     /// How far plate edges are pushed around by noise, as a fraction of map
     /// width. Zero gives straight Voronoi edges.
     pub boundary_warp: f64,
+    /// 0 scatters continental plates at random; 1 gathers them around one
+    /// point into a supercontinent.
+    pub continent_clustering: f32,
+    /// Multiplies the uplift at converging plate boundaries: more and higher
+    /// mountain ranges above 1, fewer and lower below.
+    pub mountain_scale: f32,
 }
 
 impl Default for TectonicConfig {
@@ -200,6 +323,8 @@ impl Default for TectonicConfig {
             plate_count: 16,
             continental_fraction: 0.4,
             boundary_warp: 0.06,
+            continent_clustering: 0.0,
+            mountain_scale: 1.0,
         }
     }
 }

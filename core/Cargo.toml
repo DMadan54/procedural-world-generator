@@ -11,6 +11,7 @@ license.workspace = true
 noise.workspace = true
 rand_chacha.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 rayon = { workspace = true, optional = true }
 
 [features]
@@ -18,5 +19,3 @@ rayon = { workspace = true, optional = true }
 # Not available on wasm32-unknown-unknown, which has no threads.
 parallel = ["dep:rayon"]
 
-[dev-dependencies]
-serde_json.workspace = true

@@ -82,12 +82,20 @@ pub fn generate_tectonics(config: &WorldConfig) -> TectonicMap {
     let params = &config.tectonics;
     let count = params.plate_count.clamp(1, NO_BOUNDARY as usize - 1);
 
-    let plates = scatter_plates(seed, count, width, height, params.continental_fraction);
+    let plates = scatter_plates(seed, count, width, height, params);
     // Own stream: the warp field is the same whatever the plate count.
     let warp_seed = stage_rng(seed, stage::TECTONIC_WARP).next_u32();
     let plate_id = voronoi(&plates, width, height, warp_seed, params.boundary_warp);
     let (boundaries, boundary_id) = find_boundaries(&plates, &plate_id, width, height);
-    let elevation = elevation(&plates, &plate_id, &boundaries, &boundary_id, width, height);
+    let elevation = elevation(
+        &plates,
+        &plate_id,
+        &boundaries,
+        &boundary_id,
+        width,
+        height,
+        params.mountain_scale,
+    );
 
     TectonicMap {
         width,
@@ -107,7 +115,7 @@ fn scatter_plates(
     count: usize,
     width: usize,
     height: usize,
-    continental_fraction: f32,
+    params: &crate::config::TectonicConfig,
 ) -> Vec<Plate> {
     const CANDIDATES: usize = 12;
     let rng = &mut stage_rng(seed, stage::TECTONIC_PLATES);
@@ -138,8 +146,23 @@ fn scatter_plates(
         let j = (rng.next_u64() % (i as u64 + 1)) as usize;
         order.swap(i, j);
     }
-    let continental = ((count as f32 * continental_fraction).round() as usize)
+    let continental = ((count as f32 * params.continental_fraction).round() as usize)
         .clamp(1.min(count), count.saturating_sub(1).max(1));
+    // With clustering, plates near one focus point are preferred, gathering
+    // the continents together. At 0 this is exactly the shuffled order.
+    let clustering = params.continent_clustering.clamp(0.0, 1.0);
+    if clustering > 0.0 {
+        let focus_rng = &mut stage_rng(seed, stage::TECTONIC_CLUSTER);
+        let focus = [unit_f32(focus_rng) * w, unit_f32(focus_rng) * h];
+        let diagonal = (w * w + h * h).sqrt().max(1.0);
+        let mut rank = vec![0.0f32; count];
+        for (position, &plate) in order.iter().enumerate() {
+            let random = position as f32 / count as f32;
+            let near = dist2(centres[plate], focus).sqrt() / diagonal;
+            rank[plate] = (1.0 - clustering) * random + clustering * near;
+        }
+        order.sort_by(|&a, &b| rank[a].total_cmp(&rank[b]).then(a.cmp(&b)));
+    }
     let mut kinds = vec![PlateKind::Oceanic; count];
     for &i in &order[..continental] {
         kinds[i] = PlateKind::Continental;
@@ -281,6 +304,7 @@ fn elevation(
     boundary_id: &[u16],
     width: usize,
     height: usize,
+    mountain_scale: f32,
 ) -> Vec<f32> {
     let map_width = width as f32;
 
@@ -311,12 +335,16 @@ fn elevation(
         } else {
             boundary.plates[0]
         };
-        let stress = boundary_stress(
+        let mut stress = boundary_stress(
             boundary.kind,
             boundary.convergence,
             plates[own as usize].kind,
             plates[other as usize].kind,
         );
+        if boundary.kind == BoundaryKind::Convergent {
+            stress.wide *= mountain_scale;
+            stress.narrow *= mountain_scale;
+        }
         wide[i] = stress.wide;
         narrow[i] = stress.narrow;
     }
@@ -492,6 +520,46 @@ mod tests {
         other.noise.octaves = 2;
         other.blend.tectonic_weight = 0.2;
         assert_eq!(generate_tectonics(&config(4, 12)), generate_tectonics(&other));
+    }
+
+    #[test]
+    fn clustering_gathers_continents() {
+        // Mean distance between continental plates shrinks with clustering.
+        let spread = |clustering: f32| {
+            let mut c = config(8, 24);
+            c.tectonics.continent_clustering = clustering;
+            let map = generate_tectonics(&c);
+            let land: Vec<_> = map
+                .plates
+                .iter()
+                .filter(|p| p.kind == PlateKind::Continental)
+                .map(|p| p.centre)
+                .collect();
+            let mut total = 0.0;
+            for a in &land {
+                for b in &land {
+                    total += dist2(*a, *b).sqrt();
+                }
+            }
+            total / (land.len() * land.len()) as f32
+        };
+        assert!(spread(1.0) < spread(0.0));
+    }
+
+    #[test]
+    fn mountain_scale_raises_relief() {
+        let mut low = config(3, 16);
+        low.tectonics.mountain_scale = 0.5;
+        let mut high = config(3, 16);
+        high.tectonics.mountain_scale = 2.0;
+        let max = |c: &WorldConfig| {
+            generate_tectonics(c)
+                .elevation
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max)
+        };
+        assert!(max(&high) > max(&low));
     }
 
     #[test]
