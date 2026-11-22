@@ -225,12 +225,26 @@ mod tests {
     }
 
     #[test]
-    fn heightmap_is_normalised() {
+    fn heights_are_in_range() {
         let world = World::generate(&small(9));
-        let data = &world.heightmap.data;
-        assert!(data.iter().all(|v| (0.0..=1.0).contains(v)));
-        assert_eq!(data.iter().cloned().fold(f32::INFINITY, f32::min), 0.0);
-        assert_eq!(data.iter().cloned().fold(f32::NEG_INFINITY, f32::max), 1.0);
+        assert!(world.heightmap.data.iter().all(|v| (0.0..1.0).contains(v)));
+        assert!(world.terrain.data.iter().all(|v| (0.0..=1.0).contains(v)));
+    }
+
+    #[test]
+    fn mountain_density_does_not_drown_the_land() {
+        // The bug this guards against: with heights stretched to each world's
+        // own range, taller mountains pushed everything else under the sea.
+        let land_share = |mountains: f32| {
+            let mut c = small(42);
+            c.erosion.droplets = 0;
+            c.tectonics.mountain_scale = mountains;
+            let w = World::generate(&c);
+            let sea = c.terrain.sea_level;
+            w.heightmap.data.iter().filter(|&&h| h >= sea).count() as f32 / w.heightmap.data.len() as f32
+        };
+        let (low, high) = (land_share(1.0), land_share(2.0));
+        assert!(high >= low * 0.85, "land {low} at 1.0 vs {high} at 2.0");
     }
 
     #[test]

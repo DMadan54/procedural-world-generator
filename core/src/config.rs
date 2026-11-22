@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Bump when a change makes existing configs produce different worlds (new
 /// RNG derivation, changed algorithm or defaults), so saved configs can be
 /// detected as coming from an older generator.
-pub const GENERATOR_VERSION: u32 = 3;
+pub const GENERATOR_VERSION: u32 = 4;
 
 pub const MIN_PLATES: usize = 8;
 pub const MAX_PLATES: usize = 40;
@@ -359,6 +359,11 @@ impl Default for NoiseConfig {
 pub struct BlendConfig {
     pub tectonic_weight: f32,
     pub noise_weight: f32,
+    /// Height of a blended value of 0 (before the soft limits).
+    pub height_offset: f32,
+    /// Height change per unit of blended value. Fixed rather than fitted to
+    /// each world, so sea level means the same in every world.
+    pub height_scale: f32,
 }
 
 impl Default for BlendConfig {
@@ -366,6 +371,8 @@ impl Default for BlendConfig {
         Self {
             tectonic_weight: 1.0,
             noise_weight: 0.9,
+            height_offset: 0.437,
+            height_scale: 0.258,
         }
     }
 }
