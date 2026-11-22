@@ -1,9 +1,10 @@
 use eframe::egui::{self, Color32, ColorImage, Rect, Stroke, TextureHandle, TextureOptions};
-use worldgen_core::{BoundaryKind, PlateKind, World, WorldConfig, MAX_PLATES, MIN_PLATES};
+use worldgen_core::{
+    BoundaryKind, PlateKind, World, WorldConfig, MAX_PLATES, MAX_TEMPERATURE_OFFSET, MIN_PLATES,
+    MIN_TEMPERATURE_OFFSET,
+};
 
 use crate::render::{self, Rgb};
-
-const DEFAULT_SEA_LEVEL: f32 = 0.45;
 
 /// What the central panel shows. Every pipeline stage gets an entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -18,15 +19,24 @@ enum DebugView {
     Noise,
     /// Final heightmap in greyscale.
     Heightmap,
+    /// Climate stage: mean temperature.
+    Temperature,
+    /// Climate stage: annual precipitation.
+    Precipitation,
+    /// Climate stage: prevailing winds.
+    Wind,
 }
 
 impl DebugView {
-    const ALL: [DebugView; 5] = [
+    const ALL: [DebugView; 8] = [
         DebugView::Terrain,
         DebugView::Plates,
         DebugView::TectonicRelief,
         DebugView::Noise,
         DebugView::Heightmap,
+        DebugView::Temperature,
+        DebugView::Precipitation,
+        DebugView::Wind,
     ];
 
     fn label(self) -> &'static str {
@@ -36,6 +46,9 @@ impl DebugView {
             DebugView::TectonicRelief => "Tectonic relief",
             DebugView::Noise => "Fractal noise",
             DebugView::Heightmap => "Heightmap (greyscale)",
+            DebugView::Temperature => "Temperature",
+            DebugView::Precipitation => "Precipitation",
+            DebugView::Wind => "Prevailing winds",
         }
     }
 }
@@ -46,8 +59,6 @@ pub struct WorldGenApp {
     world: World,
     seed_text: String,
     seed_error: Option<String>,
-    /// Display only: changing it recolours the existing heightmap.
-    sea_level: f32,
     view: DebugView,
     texture: Option<TextureHandle>,
     /// Set when the image needs redrawing (new world, view or colouring).
@@ -63,7 +74,6 @@ impl WorldGenApp {
             config,
             world,
             seed_error: None,
-            sea_level: DEFAULT_SEA_LEVEL,
             view: DebugView::Terrain,
             texture: None,
             texture_dirty: true,
@@ -96,14 +106,19 @@ impl WorldGenApp {
 
     fn render_view(&self) -> ColorImage {
         let (w, h) = (self.world.config.width, self.world.config.height);
+        let sea = self.world.config.terrain.sea_level;
+        let (map, climate) = (&self.world.heightmap, &self.world.climate);
         match self.view {
-            DebugView::Terrain => render::hypsometric(&self.world.heightmap, self.sea_level),
+            DebugView::Terrain => render::hypsometric(map, sea),
             DebugView::Plates => render::plates(&self.world.tectonics),
             DebugView::TectonicRelief => {
                 render::stretched_greyscale(w, h, &self.world.tectonics.elevation)
             }
             DebugView::Noise => render::stretched_greyscale(w, h, &self.world.noise),
-            DebugView::Heightmap => render::greyscale(&self.world.heightmap),
+            DebugView::Heightmap => render::greyscale(map),
+            DebugView::Temperature => render::temperature(climate, map, sea),
+            DebugView::Precipitation => render::precipitation(climate, map, sea),
+            DebugView::Wind => render::wind_background(map, sea),
         }
     }
 
@@ -155,12 +170,35 @@ impl WorldGenApp {
         ui.add_space(6.0);
         ui.label("Sea level");
         let sea = ui.add(
-            egui::Slider::new(&mut self.sea_level, 0.0..=1.0)
+            egui::Slider::new(&mut self.config.terrain.sea_level, 0.0..=1.0)
                 .fixed_decimals(2)
                 .step_by(0.01),
         );
-        if sea.changed() && self.view == DebugView::Terrain {
-            self.texture_dirty = true;
+        if sea.changed() {
+            // Re-runs climate only; the heightmap is unchanged.
+            self.apply_config();
+        }
+
+        ui.add_space(6.0);
+        ui.label("Global temperature");
+        let temperature = ui.add(
+            egui::Slider::new(
+                &mut self.config.climate.global_temperature_offset,
+                MIN_TEMPERATURE_OFFSET..=MAX_TEMPERATURE_OFFSET,
+            )
+            .fixed_decimals(1)
+            .step_by(0.5)
+            .suffix(" °C"),
+        );
+        ui.horizontal(|ui| {
+            ui.weak("Ice age");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(56.0);
+                ui.weak("Hothouse");
+            });
+        });
+        if temperature.changed() {
+            self.apply_config();
         }
 
         ui.add_space(12.0);
@@ -179,9 +217,23 @@ impl WorldGenApp {
             self.texture_dirty = true;
         }
 
-        if self.view == DebugView::Plates {
-            ui.add_space(8.0);
-            self.plate_legend(ui);
+        ui.add_space(8.0);
+        match self.view {
+            DebugView::Plates => self.plate_legend(ui),
+            DebugView::Temperature => {
+                for (value, colour) in render::TEMPERATURE_SCALE {
+                    legend_row(ui, colour, &format!("{value:.0} °C"));
+                }
+            }
+            DebugView::Precipitation => {
+                for (value, colour) in render::PRECIPITATION_SCALE {
+                    legend_row(ui, colour, &format!("{value:.0} mm/year"));
+                }
+            }
+            DebugView::Wind => {
+                ui.weak("Easterly trades 0-30°, westerlies 30-60°, polar easterlies 60-90°.");
+            }
+            _ => {}
         }
 
         ui.add_space(12.0);
@@ -232,8 +284,10 @@ impl WorldGenApp {
             let rect = Rect::from_center_size(panel.center(), egui::vec2(w * scale, h * scale));
             egui::Image::new(texture).paint_at(ui, rect);
 
-            if self.view == DebugView::Plates {
-                self.draw_drift_arrows(ui.painter(), rect);
+            match self.view {
+                DebugView::Plates => self.draw_drift_arrows(ui.painter(), rect),
+                DebugView::Wind => self.draw_wind_arrows(ui.painter(), rect),
+                _ => {}
             }
         });
     }
@@ -251,6 +305,37 @@ impl WorldGenApp {
             painter.arrow(origin, arrow, Stroke::new(2.0_f32, Color32::WHITE));
             painter.circle_filled(origin, 3.5_f32, Color32::WHITE);
             painter.circle_stroke(origin, 3.5_f32, Stroke::new(1.0_f32, Color32::BLACK));
+        }
+    }
+}
+
+impl WorldGenApp {
+    fn draw_wind_arrows(&self, painter: &egui::Painter, rect: Rect) {
+        let c = &self.world.climate;
+        if c.width == 0 || c.height == 0 {
+            return;
+        }
+        // About 20 arrows across, whatever the map size.
+        let spacing = (c.width / 20).max(1);
+        let cell = rect.width() / c.width as f32 * spacing as f32;
+        let length = cell * 0.8;
+        for y in (spacing / 2..c.height).step_by(spacing) {
+            for x in (spacing / 2..c.width).step_by(spacing) {
+                let [u, v] = c.wind[y * c.width + x];
+                let centre = rect.min
+                    + egui::vec2(
+                        (x as f32 + 0.5) / c.width as f32 * rect.width(),
+                        (y as f32 + 0.5) / c.height as f32 * rect.height(),
+                    );
+                let dir = egui::vec2(u, v);
+                if dir.length() < 0.05 {
+                    painter.circle_filled(centre, 1.5_f32, Color32::from_gray(30));
+                    continue;
+                }
+                let arrow = dir.normalized() * length * dir.length().min(1.0);
+                let origin = centre - arrow * 0.5;
+                painter.arrow(origin, arrow, Stroke::new(1.5_f32, Color32::from_gray(25)));
+            }
         }
     }
 }

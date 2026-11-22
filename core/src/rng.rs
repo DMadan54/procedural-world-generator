@@ -17,6 +17,8 @@ pub mod stage {
     pub const TECTONIC_PLATES: &str = "tectonics.plates";
     pub const TECTONIC_DRIFT: &str = "tectonics.drift";
     pub const TECTONIC_WARP: &str = "tectonics.warp";
+    pub const CLIMATE: &str = "climate";
+    pub const EROSION: &str = "erosion";
 }
 
 const DOMAIN_STAGE: u64 = 0x5354_4147_4521_0001;

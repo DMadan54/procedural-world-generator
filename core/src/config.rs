@@ -24,6 +24,8 @@ pub struct WorldConfig {
     pub tectonics: TectonicConfig,
     pub noise: NoiseConfig,
     pub blend: BlendConfig,
+    pub terrain: TerrainConfig,
+    pub climate: ClimateConfig,
 }
 
 impl Default for WorldConfig {
@@ -36,6 +38,69 @@ impl Default for WorldConfig {
             tectonics: TectonicConfig::default(),
             noise: NoiseConfig::default(),
             blend: BlendConfig::default(),
+            terrain: TerrainConfig::default(),
+            climate: ClimateConfig::default(),
+        }
+    }
+}
+
+/// How normalised heights map onto the real world.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TerrainConfig {
+    /// Normalised height of the sea surface, `0.0..=1.0`.
+    pub sea_level: f32,
+    /// Height in metres of the highest point (normalised height 1.0).
+    pub max_elevation_m: f32,
+}
+
+impl Default for TerrainConfig {
+    fn default() -> Self {
+        Self {
+            sea_level: 0.45,
+            max_elevation_m: 6000.0,
+        }
+    }
+}
+
+pub const MIN_TEMPERATURE_OFFSET: f32 = -15.0;
+pub const MAX_TEMPERATURE_OFFSET: f32 = 15.0;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClimateConfig {
+    /// Shifts every temperature, in °C: negative towards an ice age,
+    /// positive towards a hothouse. Kept in
+    /// `MIN_TEMPERATURE_OFFSET..=MAX_TEMPERATURE_OFFSET` by the UI.
+    pub global_temperature_offset: f32,
+    /// Mean sea-level temperature at the equator, °C.
+    pub equator_temperature: f32,
+    /// Mean sea-level temperature at the poles, °C.
+    pub pole_temperature: f32,
+    /// Cooling with altitude, °C per km.
+    pub lapse_rate: f32,
+    /// Random large-scale temperature variation, ± °C.
+    pub temperature_variability: f32,
+    /// Share of the missing moisture an air parcel picks up per step over
+    /// ocean (a fifth of this over land, from plants and lakes).
+    pub evaporation: f32,
+    /// Share of a parcel's moisture rained out per km it is forced upwards.
+    pub orographic_rain: f32,
+    /// Share of a parcel's moisture rained out per step regardless of terrain.
+    pub base_rain: f32,
+}
+
+impl Default for ClimateConfig {
+    fn default() -> Self {
+        Self {
+            global_temperature_offset: 0.0,
+            equator_temperature: 27.0,
+            pole_temperature: -25.0,
+            lapse_rate: 6.5,
+            temperature_variability: 2.0,
+            evaporation: 0.08,
+            orographic_rain: 0.8,
+            base_rain: 0.015,
         }
     }
 }

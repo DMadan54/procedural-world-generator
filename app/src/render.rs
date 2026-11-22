@@ -2,7 +2,81 @@
 //! generation, so recolouring never requires re-running the pipeline.
 
 use eframe::egui::ColorImage;
-use worldgen_core::{BoundaryKind, Heightmap, PlateKind, TectonicMap, NO_BOUNDARY};
+use worldgen_core::{BoundaryKind, Climate, Heightmap, PlateKind, TectonicMap, NO_BOUNDARY};
+
+/// Colour stops for mean temperature, °C.
+pub const TEMPERATURE_SCALE: [(f32, Rgb); 6] = [
+    (-30.0, [49, 54, 149]),
+    (-15.0, [69, 117, 180]),
+    (0.0, [224, 243, 248]),
+    (10.0, [254, 224, 144]),
+    (20.0, [244, 109, 67]),
+    (32.0, [165, 0, 38]),
+];
+
+/// Colour stops for annual precipitation, mm.
+pub const PRECIPITATION_SCALE: [(f32, Rgb); 5] = [
+    (0.0, [150, 105, 55]),
+    (250.0, [225, 205, 140]),
+    (750.0, [150, 200, 105]),
+    (1500.0, [40, 140, 80]),
+    (3000.0, [25, 85, 170]),
+];
+
+/// Temperature colours; ocean is shown a little darker so coasts stay visible.
+pub fn temperature(climate: &Climate, map: &Heightmap, sea_level: f32) -> ColorImage {
+    scaled_field(&climate.temperature, &TEMPERATURE_SCALE, map, sea_level)
+}
+
+/// Precipitation colours; ocean is shown a little darker.
+pub fn precipitation(climate: &Climate, map: &Heightmap, sea_level: f32) -> ColorImage {
+    scaled_field(&climate.precipitation, &PRECIPITATION_SCALE, map, sea_level)
+}
+
+/// Muted terrain to draw wind arrows over.
+pub fn wind_background(map: &Heightmap, sea_level: f32) -> ColorImage {
+    let rgb: Vec<u8> = map
+        .data
+        .iter()
+        .flat_map(|&h| {
+            let c = hypsometric_colour(h, sea_level);
+            let grey = (c[0] as f32 * 0.3 + c[1] as f32 * 0.59 + c[2] as f32 * 0.11) as u8;
+            lerp(c, [grey; 3], 0.6)
+        })
+        .collect();
+    ColorImage::from_rgb([map.width, map.height], &rgb)
+}
+
+fn scaled_field(values: &[f32], scale: &[(f32, Rgb)], map: &Heightmap, sea_level: f32) -> ColorImage {
+    let rgb: Vec<u8> = values
+        .iter()
+        .zip(&map.data)
+        .flat_map(|(&v, &h)| {
+            let c = colour_scale(v, scale);
+            if h < sea_level {
+                c.map(|v| (v as f32 * 0.7) as u8)
+            } else {
+                c
+            }
+        })
+        .collect();
+    ColorImage::from_rgb([map.width, map.height], &rgb)
+}
+
+/// Piecewise-linear colour scale, clamped at both ends.
+pub fn colour_scale(value: f32, stops: &[(f32, Rgb)]) -> Rgb {
+    let (first, last) = (stops[0], stops[stops.len() - 1]);
+    if value <= first.0 {
+        return first.1;
+    }
+    for pair in stops.windows(2) {
+        let ((a, ca), (b, cb)) = (pair[0], pair[1]);
+        if value <= b {
+            return lerp(ca, cb, (value - a) / (b - a));
+        }
+    }
+    last.1
+}
 
 /// Heights at or above this are drawn as snow, whatever the sea level.
 pub const SNOW_LINE: f32 = 0.85;
@@ -184,6 +258,14 @@ mod tests {
     #[test]
     fn sea_level_zero_has_no_water() {
         assert_eq!(hypsometric_colour(0.0, 0.0), BEACH);
+    }
+
+    #[test]
+    fn colour_scale_clamps_and_interpolates() {
+        let stops = [(0.0, [0, 0, 0]), (10.0, [100, 200, 50])];
+        assert_eq!(colour_scale(-5.0, &stops), [0, 0, 0]);
+        assert_eq!(colour_scale(50.0, &stops), [100, 200, 50]);
+        assert_eq!(colour_scale(5.0, &stops), [50, 100, 25]);
     }
 
     #[test]

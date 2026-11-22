@@ -10,16 +10,22 @@
 //! config always produces the same world, and toggling a later stage never
 //! changes an earlier one.
 //!
-//! Pipeline: tectonics and noise (independent) → blended heightmap.
+//! Pipeline: tectonics and noise (independent) → blended heightmap → climate.
 
+pub mod climate;
 pub mod config;
+mod field;
 pub mod fractal;
 pub mod heightmap;
 pub mod rng;
 pub mod tectonics;
 pub mod world;
 
-pub use config::{WorldConfig, GENERATOR_VERSION, MAX_PLATES, MIN_PLATES};
+pub use climate::Climate;
+pub use config::{
+    WorldConfig, GENERATOR_VERSION, MAX_PLATES, MAX_TEMPERATURE_OFFSET, MIN_PLATES,
+    MIN_TEMPERATURE_OFFSET,
+};
 pub use heightmap::Heightmap;
 pub use tectonics::{Boundary, BoundaryKind, Plate, PlateKind, TectonicMap, NO_BOUNDARY};
 pub use world::{StagesRun, World};
