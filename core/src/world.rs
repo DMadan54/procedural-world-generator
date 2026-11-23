@@ -1,7 +1,8 @@
 //! The generation pipeline: runs each stage in order from one [`WorldConfig`].
 //!
 //! Stages: tectonics and noise (independent) → blended heightmap → erosion →
-//! climate → hydrology → biomes → habitability and travel cost → peoples. Erosion can take seconds, so besides the blocking
+//! climate → hydrology → biomes → habitability and travel cost → peoples →
+//! settlements. Erosion can take seconds, so besides the blocking
 //! [`World::generate`] and [`World::update`] there is an incremental path:
 //! [`World::set_config`] runs the cheap stages straight away and queues
 //! erosion and everything after it, and [`World::advance`] does the queued
@@ -16,6 +17,7 @@ use crate::habitability::{generate_habitability, Habitability};
 use crate::heightmap::{blend_heightmap, Heightmap};
 use crate::hydrology::{generate_hydrology, Hydrology};
 use crate::peoples::{generate_peoples, Peoples};
+use crate::settlements::{generate_settlements, SettlementInputs, Settlements};
 use crate::tectonics::{generate_tectonics, TectonicMap};
 use crate::travel::travel_cost_grid;
 
@@ -44,6 +46,8 @@ pub struct World {
     pub travel_cost: Vec<f32>,
     /// Stage: peoples, their homelands and languages.
     pub peoples: Peoples,
+    /// Stage: villages, towns, cities and capitals.
+    pub settlements: Settlements,
     /// Work queued by `set_config` and not yet done by `advance`.
     pending: Pending,
 }
@@ -57,6 +61,7 @@ struct Pending {
     habitability: bool,
     travel: bool,
     peoples: bool,
+    settlements: bool,
 }
 
 /// Which stages a config change re-ran or queued.
@@ -72,6 +77,7 @@ pub struct StagesRun {
     pub habitability: bool,
     pub travel: bool,
     pub peoples: bool,
+    pub settlements: bool,
 }
 
 impl World {
@@ -93,6 +99,15 @@ impl World {
             &habitability,
             &travel_cost,
         );
+        let settlements = generate_settlements(&SettlementInputs {
+            config,
+            terrain: &terrain,
+            climate: &climate,
+            hydrology: &hydrology,
+            biomes: &biomes,
+            habitability: &habitability,
+            peoples: &peoples,
+        });
         Self {
             config: config.clone(),
             tectonics,
@@ -105,6 +120,7 @@ impl World {
             habitability,
             travel_cost,
             peoples,
+            settlements,
             pending: Pending::default(),
         }
     }
@@ -141,6 +157,10 @@ impl World {
         let habitability = biomes || config.habitability != old.habitability;
         let travel = biomes || config.travel != old.travel;
         let peoples = habitability || travel || config.peoples != old.peoples;
+        // Settlements also read the realm target to decide how many capitals.
+        let settlements = peoples
+            || config.settlements != old.settlements
+            || config.politics.target_realms != old.politics.target_realms;
         let run = StagesRun {
             tectonics,
             noise,
@@ -152,6 +172,7 @@ impl World {
             habitability,
             travel,
             peoples,
+            settlements,
         };
 
         if tectonics {
@@ -172,6 +193,7 @@ impl World {
         self.pending.habitability |= habitability;
         self.pending.travel |= travel;
         self.pending.peoples |= peoples;
+        self.pending.settlements |= settlements;
         self.config = config.clone();
         // Without erosion to wait for, the rest is quick: do it now.
         if self.pending.erosion.is_none() {
@@ -232,6 +254,19 @@ impl World {
                 &self.travel_cost,
             );
             self.pending.peoples = false;
+            self.pending.settlements = true;
+        }
+        if self.pending.settlements {
+            self.settlements = generate_settlements(&SettlementInputs {
+                config: &self.config,
+                terrain: &self.terrain,
+                climate: &self.climate,
+                hydrology: &self.hydrology,
+                biomes: &self.biomes,
+                habitability: &self.habitability,
+                peoples: &self.peoples,
+            });
+            self.pending.settlements = false;
         }
         true
     }
@@ -278,6 +313,9 @@ mod tests {
         }
         if run.habitability || run.travel {
             run.peoples = true;
+        }
+        if run.peoples {
+            run.settlements = true;
         }
         run
     }
@@ -385,6 +423,30 @@ mod tests {
         config.peoples.count = 4;
         assert_eq!(world.set_config(&config), only(|r| r.peoples = true));
         assert_eq!(world, World::generate(&config));
+    }
+
+    #[test]
+    fn changing_settlement_settings_or_realm_target_reruns_only_settlements() {
+        for change in [
+            (|c: &mut WorldConfig| c.settlements.target_count = 60) as fn(&mut WorldConfig),
+            |c| c.politics.target_realms = 4,
+        ] {
+            let mut world = World::generate(&small(42));
+            let mut config = small(42);
+            change(&mut config);
+            assert_eq!(world.set_config(&config), only(|r| r.settlements = true));
+            assert_eq!(world, World::generate(&config));
+        }
+    }
+
+    #[test]
+    fn story_settings_rerun_nothing() {
+        let mut world = World::generate(&small(42));
+        let mut config = small(42);
+        config.magic.level = crate::config::MagicLevel::Saturated;
+        config.history.years = 9000;
+        config.politics.empire_formation = 0.9;
+        assert_eq!(world.set_config(&config), StagesRun::default());
     }
 
     #[test]

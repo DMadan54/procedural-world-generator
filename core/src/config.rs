@@ -32,6 +32,7 @@ pub struct WorldConfig {
     pub habitability: HabitabilityConfig,
     pub travel: TravelConfig,
     pub peoples: PeoplesConfig,
+    pub settlements: SettlementConfig,
     pub magic: MagicConfig,
     pub politics: PoliticsConfig,
     pub disasters: DisasterConfig,
@@ -56,6 +57,7 @@ impl Default for WorldConfig {
             habitability: HabitabilityConfig::default(),
             travel: TravelConfig::default(),
             peoples: PeoplesConfig::default(),
+            settlements: SettlementConfig::default(),
             magic: MagicConfig::default(),
             politics: PoliticsConfig::default(),
             disasters: DisasterConfig::default(),
@@ -187,6 +189,51 @@ impl Default for TerrainConfig {
 }
 
 pub const MAX_DROPLETS: u32 = 1_000_000;
+
+/// Settlement placement and ranking. Distances are in cells of a 512-wide
+/// map and scale with world size; the target count scales with area.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SettlementConfig {
+    /// Roughly how many settlements on a 512x512 world.
+    pub target_count: u32,
+    /// Minimum distance between settlements on the poorest land.
+    pub min_spacing: f32,
+    /// How much richer land shrinks the spacing (0 = not at all, 1 = to 0).
+    pub fertile_spacing_factor: f32,
+    /// Sites scoring below this are never settled.
+    pub score_floor: f32,
+    /// Score bonus for a site beside a sizeable river.
+    pub river_bonus: f32,
+    /// Score bonus for a site on the coast.
+    pub port_bonus: f32,
+    /// Radius of land that feeds a settlement.
+    pub catchment_radius: f32,
+    /// Population of a settlement on perfect land, before river and port
+    /// boosts.
+    pub base_population: f32,
+    /// Share of non-capital settlements that are cities.
+    pub city_share: f32,
+    /// Share of non-capital settlements that are towns.
+    pub town_share: f32,
+}
+
+impl Default for SettlementConfig {
+    fn default() -> Self {
+        Self {
+            target_count: 140,
+            min_spacing: 14.0,
+            fertile_spacing_factor: 0.5,
+            score_floor: 0.3,
+            river_bonus: 0.15,
+            port_bonus: 0.1,
+            catchment_radius: 6.0,
+            base_population: 9000.0,
+            city_share: 0.1,
+            town_share: 0.3,
+        }
+    }
+}
 
 /// Weights for how attractive land is to live on. Radii are in cells of a
 /// 512-wide map and scale with world size.

@@ -24,6 +24,7 @@ pub mod stage {
     pub const LANGUAGE: &str = "language";
     pub const PEOPLES: &str = "peoples";
     pub const PEOPLE_TRAITS: &str = "peoples.traits";
+    pub const SETTLEMENTS: &str = "settlements";
     pub const NAMES_PEOPLE: &str = "names.people";
     pub const NAMES_PLACE: &str = "names.place";
     pub const NAMES_PERSON: &str = "names.person";

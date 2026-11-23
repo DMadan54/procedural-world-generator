@@ -49,10 +49,12 @@ enum DebugView {
     Habitability,
     /// Peoples stage: homelands, origins and names.
     Peoples,
+    /// Settlements stage: sites by rank over the homelands.
+    Settlements,
 }
 
 impl DebugView {
-    const ALL: [DebugView; 13] = [
+    const ALL: [DebugView; 14] = [
         DebugView::Terrain,
         DebugView::Plates,
         DebugView::TectonicRelief,
@@ -66,6 +68,7 @@ impl DebugView {
         DebugView::Biomes,
         DebugView::Habitability,
         DebugView::Peoples,
+        DebugView::Settlements,
     ];
 
     fn label(self) -> &'static str {
@@ -83,6 +86,7 @@ impl DebugView {
             DebugView::Biomes => "Biomes",
             DebugView::Habitability => "Habitability",
             DebugView::Peoples => "Peoples",
+            DebugView::Settlements => "Settlements",
         }
     }
 }
@@ -215,7 +219,7 @@ impl WorldGenApp {
             DebugView::Drainage => render::flow_accumulation(map, &self.world.hydrology, sea),
             DebugView::Biomes => render::biomes(&self.world.biomes),
             DebugView::Habitability => render::habitability(&self.world),
-            DebugView::Peoples => render::peoples(&self.world),
+            DebugView::Peoples | DebugView::Settlements => render::peoples(&self.world),
         }
     }
 
@@ -411,6 +415,24 @@ impl WorldGenApp {
                 }
                 ui.weak("Grey land belongs to no people.");
             }
+            Some(DebugView::Settlements) => {
+                use worldgen_core::settlements::Rank;
+                let list = &self.world.settlements.settlements;
+                for rank in [Rank::Capital, Rank::City, Rank::Town, Rank::Village] {
+                    let n = list.iter().filter(|s| s.rank == rank).count();
+                    ui.label(format!("{}: {n}", rank.name()));
+                }
+                let flags = |f: fn(&worldgen_core::settlements::SettlementFlags) -> bool| {
+                    list.iter().filter(|s| f(&s.flags)).count()
+                };
+                ui.weak(format!(
+                    "Ports {}, river crossings {}, passes {}, oases {}",
+                    flags(|f| f.port),
+                    flags(|f| f.river_crossing),
+                    flags(|f| f.mountain_pass),
+                    flags(|f| f.oasis)
+                ));
+            }
             Some(DebugView::Biomes) => {
                 ui.weak("Share of land");
                 for (biome, share) in self.world.biomes.coverage() {
@@ -587,6 +609,7 @@ impl WorldGenApp {
             match debug_view {
                 Some(DebugView::Plates) => self.draw_drift_arrows(ui.painter(), rect),
                 Some(DebugView::Peoples) => self.draw_people_names(ui.painter(), rect),
+                Some(DebugView::Settlements) => self.draw_settlement_markers(ui.painter(), rect),
                 Some(DebugView::Wind) => self.draw_wind_arrows(ui.painter(), rect),
                 Some(DebugView::Terrain | DebugView::Drainage) if !self.before_erosion => {
                     self.draw_rivers(ui.painter(), rect)
@@ -634,6 +657,34 @@ impl WorldGenApp {
 }
 
 impl WorldGenApp {
+    /// Settlements as rank-sized dots; capitals labelled.
+    fn draw_settlement_markers(&self, painter: &egui::Painter, rect: Rect) {
+        use worldgen_core::settlements::Rank;
+        let s = &self.world.settlements;
+        let scale = rect.width() / s.width.max(1) as f32;
+        for settlement in &s.settlements {
+            let [x, y] = settlement.position(s.width);
+            let at = rect.min + egui::vec2(x as f32 + 0.5, y as f32 + 0.5) * scale;
+            let radius = match settlement.rank {
+                Rank::Capital => 5.0,
+                Rank::City => 3.5,
+                Rank::Town => 2.5,
+                Rank::Village => 1.6,
+            };
+            painter.circle_filled(at, radius + 1.0, Color32::BLACK);
+            painter.circle_filled(at, radius, Color32::WHITE);
+            if settlement.rank == Rank::Capital {
+                painter.text(
+                    at + egui::vec2(0.0, -8.0),
+                    egui::Align2::CENTER_BOTTOM,
+                    &settlement.name,
+                    egui::FontId::proportional(13.0),
+                    Color32::BLACK,
+                );
+            }
+        }
+    }
+
     /// Each people's name at its origin, with a marker.
     fn draw_people_names(&self, painter: &egui::Painter, rect: Rect) {
         let p = &self.world.peoples;
