@@ -18,7 +18,10 @@ const EROSION_CHANGE_SCALE: f32 = 0.04;
 use crate::link;
 use crate::render::{self, Rgb};
 use crate::setup::SetupPanel;
+use crate::style::Canvas;
 use crate::style::{all_styles, MapStyle};
+use crate::timeline::{self, Timeline};
+use worldgen_core::history::HistoryState;
 
 /// What the central panel shows. Every pipeline stage gets an entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,10 +56,12 @@ enum DebugView {
     Settlements,
     /// Realms stage: the political map at year 0.
     Realms,
+    /// History stage: realms at the slider year.
+    HistoryRealms,
 }
 
 impl DebugView {
-    const ALL: [DebugView; 15] = [
+    const ALL: [DebugView; 16] = [
         DebugView::Terrain,
         DebugView::Plates,
         DebugView::TectonicRelief,
@@ -72,6 +77,7 @@ impl DebugView {
         DebugView::Peoples,
         DebugView::Settlements,
         DebugView::Realms,
+        DebugView::HistoryRealms,
     ];
 
     fn label(self) -> &'static str {
@@ -91,6 +97,7 @@ impl DebugView {
             DebugView::Peoples => "Peoples",
             DebugView::Settlements => "Settlements",
             DebugView::Realms => "Realms",
+            DebugView::HistoryRealms => "Realms by year",
         }
     }
 }
@@ -113,12 +120,25 @@ pub struct WorldGenApp {
     /// Show the terrain as it was before erosion (Terrain and Heightmap views).
     before_erosion: bool,
     texture: Option<TextureHandle>,
-    /// Set when the image needs redrawing (new world, view or colouring).
+    /// Set when the image needs redrawing (new world, view, year or colouring).
     texture_dirty: bool,
+    timeline: Timeline,
+    /// History state at the timeline's year (cached; stepped forward while
+    /// playing).
+    state: Option<HistoryState>,
+    /// The current style's year-independent layers, cached per world.
+    landscape: Option<Canvas>,
+    /// The state at the end of history, for naming realms and settlements
+    /// in the event feed.
+    names: Option<HistoryState>,
+    /// The age the cartouche counts years in, named in the dominant people's
+    /// language.
+    era: String,
 }
 
 impl WorldGenApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        timeline::register_fonts(&cc.egui_ctx);
         let (config, notice) = link::startup_config();
         // Show a map straight away and erode in the background with progress,
         // rather than blocking start-up on erosion.
@@ -144,6 +164,61 @@ impl WorldGenApp {
             before_erosion: false,
             texture: None,
             texture_dirty: true,
+            timeline: Timeline::default(),
+            state: None,
+            landscape: None,
+            names: None,
+            era: String::new(),
+        }
+    }
+
+    /// Drops everything cached from the previous world.
+    fn world_changed(&mut self) {
+        self.texture_dirty = true;
+        self.state = None;
+        self.landscape = None;
+        self.names = None;
+        self.era.clear();
+        self.timeline.selected = None;
+        self.timeline.year = self.timeline.year.min(self.world.history.years);
+    }
+
+    /// Whether the history shown is up to date with the world.
+    fn history_ready(&self) -> bool {
+        self.world.history_progress().is_none()
+    }
+
+    /// Brings the cached state to the timeline's year: steps forward from
+    /// the cached state when close (smooth playback), otherwise looks it up
+    /// from the nearest snapshot. While history is being re-simulated, shows
+    /// the world as it stands at year 0.
+    fn ensure_state(&mut self) {
+        if !self.history_ready() {
+            if self
+                .state
+                .as_ref()
+                .is_none_or(|s| s.year != 0 || s.applied != 0)
+            {
+                self.state = Some(HistoryState::initial(
+                    &self.world.realms,
+                    &self.world.settlements,
+                ));
+            }
+            return;
+        }
+        let year = self.timeline.year.min(self.world.history.years);
+        match &mut self.state {
+            Some(state) if state.year == year && state.applied > 0 => {}
+            Some(state) if year > state.year && year - state.year <= 300 && state.applied > 0 => {
+                self.world.history.advance_state(state, year);
+            }
+            _ => self.state = Some(self.world.history.state_at(year)),
+        }
+        if self.names.is_none() {
+            self.names = Some(self.world.history.state_at(self.world.history.years));
+        }
+        if self.era.is_empty() {
+            self.era = era_name(&self.world);
         }
     }
 
@@ -153,7 +228,7 @@ impl WorldGenApp {
     fn apply_config(&mut self) {
         let run = self.world.set_config(&self.config);
         if run != Default::default() {
-            self.texture_dirty = true;
+            self.world_changed();
         }
     }
 
@@ -162,8 +237,10 @@ impl WorldGenApp {
         if self.world.is_ready() {
             return;
         }
-        if self.world.advance(EROSION_ROUNDS_PER_FRAME) {
-            self.texture_dirty = true;
+        let erosion_before = self.world.erosion_progress().is_some();
+        let ready = self.world.advance(EROSION_ROUNDS_PER_FRAME);
+        if ready || (erosion_before && self.world.erosion_progress().is_none()) {
+            self.world_changed();
         }
         ctx.request_repaint();
     }
@@ -193,9 +270,15 @@ impl WorldGenApp {
         }
     }
 
-    fn render_view(&self) -> ColorImage {
+    fn render_view(&mut self) -> ColorImage {
+        self.ensure_state();
+        let state = self.state.as_ref().expect("ensure_state fills it");
         if let Some(style) = self.style.and_then(|i| self.styles.get(i)) {
-            let canvas = style.render(&self.world);
+            let world = &self.world;
+            let landscape = self
+                .landscape
+                .get_or_insert_with(|| style.render_landscape(world));
+            let canvas = style.render_year(world, state, landscape);
             return ColorImage::from_rgb([canvas.width, canvas.height], &canvas.to_rgb8());
         }
         let (w, h) = (self.world.config.width, self.world.config.height);
@@ -225,6 +308,7 @@ impl WorldGenApp {
             DebugView::Habitability => render::habitability(&self.world),
             DebugView::Peoples | DebugView::Settlements => render::peoples(&self.world),
             DebugView::Realms => render::realms(&self.world),
+            DebugView::HistoryRealms => render::realms_at(&self.world, state),
         }
     }
 
@@ -643,6 +727,18 @@ impl WorldGenApp {
                 }
                 _ => {}
             }
+            if self.style.is_some() || self.view == DebugView::HistoryRealms {
+                if let Some(state) = &self.state {
+                    timeline::draw_cartouche(ui.painter(), rect, state.year, &self.era);
+                    if let Some(event) = self
+                        .timeline
+                        .selected
+                        .and_then(|i| self.world.history.events.get(i))
+                    {
+                        timeline::draw_highlight(ui.painter(), rect, state, event);
+                    }
+                }
+            }
             if self.style.is_none()
                 && self.before_erosion
                 && matches!(self.view, DebugView::Terrain | DebugView::Heightmap)
@@ -931,6 +1027,18 @@ fn capitalised(text: &str) -> String {
         .unwrap_or_default()
 }
 
+/// The name of the age years are counted in: a word from the language of
+/// the people with the largest homeland.
+fn era_name(world: &World) -> String {
+    world
+        .peoples
+        .peoples
+        .iter()
+        .max_by(|a, b| a.cells.cmp(&b.cells).then(b.id.cmp(&a.id)))
+        .map(|p| p.language.place_name(900_000))
+        .unwrap_or_else(|| "Kings".to_owned())
+}
+
 /// A small label in the top-left corner of the map.
 fn badge(painter: &egui::Painter, rect: Rect, text: &str) {
     let galley = painter.layout_no_wrap(
@@ -980,6 +1088,21 @@ impl eframe::App for WorldGenApp {
         }
         self.advance_pipeline(ctx);
         self.side_panel(ctx);
+        let years = self.world.history.years;
+        let progress = self.world.history_progress();
+        let mut year_changed = self.timeline.tick(ctx, years);
+        year_changed |= self.timeline.show_bar(ctx, &self.world.history, progress);
+        if self.history_ready() {
+            if self.names.is_none() {
+                self.ensure_state();
+            }
+            if let Some(names) = &self.names {
+                year_changed |= self.timeline.show_feed(ctx, &self.world.history, names);
+            }
+        }
+        if year_changed && (self.style.is_some() || self.view == DebugView::HistoryRealms) {
+            self.texture_dirty = true;
+        }
         self.central_panel(ctx);
     }
 }

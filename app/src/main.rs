@@ -3,6 +3,7 @@ mod link;
 mod render;
 mod setup;
 mod style;
+mod timeline;
 
 use app::WorldGenApp;
 

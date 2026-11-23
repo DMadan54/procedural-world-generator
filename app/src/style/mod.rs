@@ -17,16 +17,29 @@ mod util;
 pub use antique::AntiqueStyle;
 pub use borders::realm_colour;
 pub use canvas::Canvas;
+pub use text::REGULAR as FELL_REGULAR;
 
+use worldgen_core::history::HistoryState;
 use worldgen_core::World;
 
 pub trait MapStyle {
     /// Name shown in the view menu.
     fn name(&self) -> &'static str;
 
-    /// Renders the whole map. The canvas may be larger than the world grid
-    /// (for crisper linework); the app scales it to fit.
-    fn render(&self, world: &World) -> Canvas;
+    /// The layers that don't change with the year: terrain, water,
+    /// vegetation. The app caches this until the world changes. The canvas
+    /// may be larger than the world grid (for crisper linework).
+    fn render_landscape(&self, world: &World) -> Canvas;
+
+    /// The layers that change with the year (realms, settlements,
+    /// lettering), drawn onto a copy of the cached landscape.
+    fn render_year(&self, world: &World, state: &HistoryState, landscape: &Canvas) -> Canvas;
+
+    /// The whole map for one year, without caching (tests now; export later).
+    #[allow(dead_code)]
+    fn render(&self, world: &World, state: &HistoryState) -> Canvas {
+        self.render_year(world, state, &self.render_landscape(world))
+    }
 }
 
 /// Every available style, default first.

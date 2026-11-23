@@ -1,6 +1,7 @@
 //! Political colouring for the antique style: a hand-applied watercolour
 //! wash just inside each realm's edge, and dotted frontiers between realms.
 
+use worldgen_core::history::HistoryState;
 use worldgen_core::realms::NO_REALM;
 use worldgen_core::World;
 
@@ -31,8 +32,8 @@ pub fn realm_colour(index: u8) -> Colour {
 /// Washes colour along the inside of every realm's edge (coasts included),
 /// strongest at the edge and fading inward, the way colourists tinted
 /// printed maps by hand.
-pub fn wash(canvas: &mut Canvas, world: &World, s: f32) {
-    let r = &world.realms;
+pub fn wash(canvas: &mut Canvas, state: &HistoryState, s: f32) {
+    let r = state;
     let (w, h) = (r.width, r.height);
     if w == 0 || h == 0 {
         return;
@@ -90,8 +91,8 @@ pub fn wash(canvas: &mut Canvas, world: &World, s: f32) {
 
 /// Dotted frontiers: firm dots between two realms, faint sparse dots where a
 /// realm gives way to unclaimed wilderness.
-pub fn frontiers(canvas: &mut Canvas, world: &World, s: f32) {
-    let r = &world.realms;
+pub fn frontiers(canvas: &mut Canvas, world: &World, state: &HistoryState, s: f32) {
+    let r = state;
     let (w, h) = (r.width, r.height);
     let land = |i: usize| !world.biomes.biome[i].is_water();
     for y in 0..h {

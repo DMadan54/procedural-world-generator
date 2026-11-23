@@ -29,6 +29,9 @@ browser.
   Archipelago.
 - **Share links.** "Copy share link" gives a short URL that opens exactly
   the same world for anyone.
+- **History with a time slider.** Scrub or play through the centuries and
+  watch realms rise, split and fall; an event feed lists what happened and
+  why, and the year shows in an antique cartouche.
 - **Debug views for every stage.** Inspect plates, relief, noise, erosion,
   temperature, rainfall, winds, drainage and biomes from the View menu.
 
@@ -49,9 +52,10 @@ Each stage reads the outputs of the ones before it and has its own debug view.
 | Peoples | Places cultures on the best land and spreads them over a travel-cost map so homelands end at mountains and seas; each gets traits and its own naming language. | Peoples |
 | Settlements | Places villages, towns, cities and capitals on the best sites, ranks them by population, flags ports, river crossings, passes and oases, and names them in their people's language. | Settlements |
 | Realms | Founds a realm at each capital and grows its territory over the travel-cost map, so borders follow mountains, rivers and straits; each realm takes a government, name, ruling house and arms from its people. | Realms |
+| History | Simulates centuries as an append-only event log: rulers die and are succeeded, frontiers shift, strong realms conquer weak ones and large ones break apart, towns grow, dwindle, are founded and renamed. Every event records its cause; snapshots make any year instant to show. | Realms by year, event feed |
 
-The magic, politics, disasters and history settings are saved with each world
-and travel in share links, but no stage uses them yet.
+Politics and history settings drive the realm and history stages. Magic and
+disaster settings travel with each world but no stage uses them yet.
 
 ## Running it
 

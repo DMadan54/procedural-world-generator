@@ -128,6 +128,26 @@ pub fn peoples(world: &worldgen_core::World) -> ColorImage {
     ColorImage::from_rgb([p.width, p.height], &rgb)
 }
 
+/// Realms at a year of history, in their colours.
+pub fn realms_at(
+    world: &worldgen_core::World,
+    state: &worldgen_core::history::HistoryState,
+) -> ColorImage {
+    let rgb: Vec<u8> = (0..state.owner.len())
+        .flat_map(|i| {
+            let owner = state.owner[i];
+            if world.biomes.biome[i].is_water() {
+                [25, 45, 80]
+            } else if owner == worldgen_core::realms::NO_REALM {
+                [120, 115, 108]
+            } else {
+                realm_rgb(state.realms[owner as usize].colour)
+            }
+        })
+        .collect();
+    ColorImage::from_rgb([state.width, state.height], &rgb)
+}
+
 /// Realms in their wash colours (stronger than on the map), wilderness grey.
 pub fn realms(world: &worldgen_core::World) -> ColorImage {
     let r = &world.realms;

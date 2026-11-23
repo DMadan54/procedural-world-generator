@@ -2,6 +2,7 @@
 //! tree glyphs, aged palette.
 
 use worldgen_core::climate::elevation_m;
+use worldgen_core::history::HistoryState;
 use worldgen_core::hydrology::{NO_LAKE, NO_SEGMENT};
 use worldgen_core::settlements::NO_SETTLEMENT;
 use worldgen_core::{Biome, World};
@@ -97,7 +98,7 @@ impl MapStyle for AntiqueStyle {
         "Antique map"
     }
 
-    fn render(&self, world: &World) -> Canvas {
+    fn render_landscape(&self, world: &World) -> Canvas {
         let scale = self.scale.max(1);
         let s = scale as f32;
         let terrain = &world.terrain;
@@ -205,9 +206,6 @@ impl MapStyle for AntiqueStyle {
             }
         }
 
-        // Watercolour wash inside each realm's edge, under the ink.
-        borders::wash(&mut canvas, world, s);
-
         // Rivers: smoothed, tapering with discharge.
         let threshold = world.config.hydrology.river_threshold.max(1e-3);
         for segment in &hy.segments {
@@ -235,15 +233,22 @@ impl MapStyle for AntiqueStyle {
             draw_glyph(&mut canvas, glyph, s);
         }
 
-        borders::frontiers(&mut canvas, world, s);
-
-        // Lettering last, so it sits on top of the landscape.
-        lettering::draw_realm_names(&mut canvas, world, s);
-        lettering::draw_people_names(&mut canvas, world, s);
-        lettering::draw_settlements(&mut canvas, world, s);
-        lettering::draw_settlement_labels(&mut canvas, world, s);
-
         age(&mut canvas, s);
+        canvas
+    }
+
+    /// Realm colouring, frontiers, names and settlements for one year, on a
+    /// copy of the landscape. The watercolour goes over the ink, as a
+    /// colourist's wash did on a printed map.
+    fn render_year(&self, world: &World, state: &HistoryState, landscape: &Canvas) -> Canvas {
+        let s = self.scale.max(1) as f32;
+        let mut canvas = landscape.clone();
+        borders::wash(&mut canvas, state, s);
+        borders::frontiers(&mut canvas, world, state, s);
+        lettering::draw_realm_names(&mut canvas, state, s);
+        lettering::draw_people_names(&mut canvas, world, state, s);
+        lettering::draw_settlements(&mut canvas, state, s);
+        lettering::draw_settlement_labels(&mut canvas, world, state, s);
         frame(&mut canvas, s);
         canvas
     }
@@ -609,7 +614,7 @@ mod tests {
     #[test]
     fn renders_at_the_requested_scale() {
         let world = small_world();
-        let canvas = AntiqueStyle { scale: 2 }.render(&world);
+        let canvas = AntiqueStyle { scale: 2 }.render(&world, &world.history.state_at(0));
         assert_eq!((canvas.width, canvas.height), (192, 192));
         assert!(canvas
             .pixels
@@ -621,6 +626,7 @@ mod tests {
     fn rendering_is_deterministic() {
         let world = small_world();
         let style = AntiqueStyle::default();
-        assert_eq!(style.render(&world), style.render(&world));
+        let state = world.history.state_at(world.history.years);
+        assert_eq!(style.render(&world, &state), style.render(&world, &state));
     }
 }

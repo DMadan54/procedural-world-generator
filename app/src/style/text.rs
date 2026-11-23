@@ -8,7 +8,7 @@ use ab_glyph::{point, Font, FontRef, Glyph, PxScale, ScaleFont};
 
 use super::canvas::{Canvas, Colour};
 
-static REGULAR: &[u8] = include_bytes!("../../assets/fonts/IMFeENrm28P.ttf");
+pub static REGULAR: &[u8] = include_bytes!("../../assets/fonts/IMFeENrm28P.ttf");
 static ITALIC: &[u8] = include_bytes!("../../assets/fonts/IMFeENit28P.ttf");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

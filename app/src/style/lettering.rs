@@ -1,8 +1,9 @@
 //! Settlement glyphs, settlement labels and people names for the antique
 //! style.
 
+use worldgen_core::history::{HistoryState, SettlementState};
 use worldgen_core::hydrology::NO_SEGMENT;
-use worldgen_core::settlements::{Rank, Settlement};
+use worldgen_core::settlements::Rank;
 use worldgen_core::World;
 
 use super::canvas::{Canvas, Colour};
@@ -30,20 +31,50 @@ fn label_style(rank: Rank, s: f32) -> (Face, f32) {
     }
 }
 
-fn centre(settlement: &Settlement, width: usize, s: f32) -> [f32; 2] {
-    let [x, y] = settlement.position(width);
+fn centre(settlement: &SettlementState, width: usize, s: f32) -> [f32; 2] {
+    let (x, y) = (
+        settlement.cell as usize % width,
+        settlement.cell as usize / width,
+    );
     [(x as f32 + 0.5) * s, (y as f32 + 0.5) * s]
 }
 
+/// How a settlement is drawn in this year: a capital whose realm has fallen
+/// is just a city.
+fn shown_rank(state: &HistoryState, id: usize) -> Rank {
+    let rank = state.settlements[id].rank;
+    if rank == Rank::Capital
+        && !state
+            .realms
+            .iter()
+            .any(|r| r.alive && r.capital as usize == id)
+    {
+        Rank::City
+    } else {
+        rank
+    }
+}
+
+/// Living settlements with how they're drawn, in id order.
+fn living(state: &HistoryState) -> Vec<(usize, &SettlementState, Rank)> {
+    state
+        .settlements
+        .iter()
+        .enumerate()
+        .filter(|(_, st)| st.alive)
+        .map(|(id, st)| (id, st, shown_rank(state, id)))
+        .collect()
+}
+
 /// Draws every settlement glyph.
-pub fn draw_settlements(canvas: &mut Canvas, world: &World, s: f32) {
-    let w = world.settlements.width;
-    for settlement in &world.settlements.settlements {
+pub fn draw_settlements(canvas: &mut Canvas, state: &HistoryState, s: f32) {
+    let w = state.width;
+    for (_, settlement, rank) in living(state) {
         let c = centre(settlement, w, s);
-        let r = glyph_radius(settlement.rank, s);
+        let r = glyph_radius(rank, s);
         // Clear a little paper so hatching and trees don't run into the mark.
         canvas.dot(c, r + 0.7 * s, PAPER, 1.0);
-        match settlement.rank {
+        match rank {
             Rank::Capital => {
                 ring(canvas, c, r, 0.55 * s);
                 star(canvas, c, r * 0.68, r * 0.28);
@@ -104,14 +135,14 @@ impl Rect {
 /// a glyph or an earlier label or leaves the frame; among the rest the one
 /// covering the least water and river wins. Labels that fit nowhere are
 /// dropped, so the smallest places go first.
-pub fn draw_settlement_labels(canvas: &mut Canvas, world: &World, s: f32) {
-    let w = world.settlements.width;
-    let list = &world.settlements.settlements;
+pub fn draw_settlement_labels(canvas: &mut Canvas, world: &World, state: &HistoryState, s: f32) {
+    let w = state.width;
+    let list = living(state);
     let mut occupied: Vec<Rect> = list
         .iter()
-        .map(|st| {
+        .map(|&(_, st, rank)| {
             let c = centre(st, w, s);
-            let r = glyph_radius(st.rank, s) + 0.5 * s;
+            let r = glyph_radius(rank, s) + 0.5 * s;
             Rect {
                 x0: c[0] - r,
                 y0: c[1] - r,
@@ -121,21 +152,20 @@ pub fn draw_settlement_labels(canvas: &mut Canvas, world: &World, s: f32) {
         })
         .collect();
 
-    let mut order: Vec<&Settlement> = list.iter().collect();
+    let mut order = list.clone();
     order.sort_by(|a, b| {
-        b.rank
-            .cmp(&a.rank)
-            .then(b.population.cmp(&a.population))
-            .then(a.id.cmp(&b.id))
+        b.2.cmp(&a.2)
+            .then(b.1.population.cmp(&a.1.population))
+            .then(a.0.cmp(&b.0))
     });
 
     let inset = 7.0 * s;
     let (cw, ch) = (canvas.width as f32, canvas.height as f32);
-    for settlement in order {
-        let (face, size) = label_style(settlement.rank, s);
+    for (_, settlement, rank) in order {
+        let (face, size) = label_style(rank, s);
         let m = text::measure(&settlement.name, face, size, 0.0);
         let c = centre(settlement, w, s);
-        let g = glyph_radius(settlement.rank, s) + 0.9 * s;
+        let g = glyph_radius(rank, s) + 0.9 * s;
         let mid = m.ascent * 0.35;
         // Baseline-left origins for E, W, N, S and the diagonals.
         let candidates = [
@@ -251,13 +281,13 @@ const PEOPLE_ARCH: ArchStyle = ArchStyle {
     coverage: 0.5,
 };
 
-/// Each realm's name arched along its territory's main axis.
-pub fn draw_realm_names(canvas: &mut Canvas, world: &World, s: f32) {
-    let r = &world.realms;
-    let min_cells = (r.width * r.height) as u32 / 400;
-    for realm in &r.realms {
+/// Each living realm's name arched along its territory's main axis.
+pub fn draw_realm_names(canvas: &mut Canvas, state: &HistoryState, s: f32) {
+    let (w, h) = (state.width, state.height);
+    let min_cells = (w * h) as u32 / 400;
+    for (id, realm) in state.living_realms() {
         if realm.cells >= min_cells {
-            let cells = cells_where(r.width, r.height, |i| r.owner[i] == realm.id);
+            let cells = cells_where(w, h, |i| state.owner[i] == id);
             draw_arched(
                 canvas,
                 &cells,
@@ -271,7 +301,7 @@ pub fn draw_realm_names(canvas: &mut Canvas, world: &World, s: f32) {
 
 /// Names of sizeable peoples whose homeland spans two or more realms, placed
 /// over the part outside their main realm's name.
-pub fn draw_people_names(canvas: &mut Canvas, world: &World, s: f32) {
+pub fn draw_people_names(canvas: &mut Canvas, world: &World, state: &HistoryState, s: f32) {
     let p = &world.peoples;
     let (w, h) = (p.width, p.height);
     let min_cells = (w * h) as u32 / 150;
@@ -281,7 +311,7 @@ pub fn draw_people_names(canvas: &mut Canvas, world: &World, s: f32) {
         }
         let realms: std::collections::BTreeSet<u16> = (0..w * h)
             .filter(|&i| p.homeland[i] == people.id)
-            .map(|i| world.realms.owner[i])
+            .map(|i| state.owner[i])
             .filter(|&o| o != worldgen_core::realms::NO_REALM)
             .collect();
         if realms.len() < 2 {
