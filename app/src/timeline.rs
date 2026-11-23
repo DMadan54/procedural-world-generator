@@ -511,6 +511,46 @@ pub fn describe(event: &Event, names: &HistoryState) -> String {
             realm_name(names, *realm),
             cells.len()
         ),
+        EventKind::VolcanoErupted { name, .. } => {
+            format!("{name} erupts where the plates grind together")
+        }
+        EventKind::Earthquake {
+            magnitude, cell, ..
+        } => {
+            let near = names
+                .settlements
+                .iter()
+                .filter(|s| s.alive)
+                .min_by_key(|s| {
+                    let w = names.width.max(1);
+                    let (a, b) = (s.cell as usize, *cell as usize);
+                    (a % w).abs_diff(b % w).pow(2) + (a / w).abs_diff(b / w).pow(2)
+                })
+                .map_or("the wilds", |s| s.name.as_str());
+            format!("An earthquake of strength {magnitude:.1} shakes the land near {near}")
+        }
+        EventKind::HardTimes { settlements, .. } => {
+            format!(
+                "Hard years for {} settlements: ash and failed harvests",
+                settlements.len()
+            )
+        }
+        EventKind::SettlementStruck {
+            settlement,
+            deaths,
+            abandoned,
+            ..
+        } => {
+            let fate = if *abandoned {
+                "; the survivors abandon it"
+            } else {
+                ""
+            };
+            format!(
+                "{} is stricken: {deaths} die{fate}",
+                settlement_name(names, *settlement)
+            )
+        }
         EventKind::BlightReachedSettlement {
             settlement,
             deaths,

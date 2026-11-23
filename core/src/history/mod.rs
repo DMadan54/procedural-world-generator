@@ -7,6 +7,7 @@
 //! always equals replaying every event from year 0. Later stages (trade,
 //! diplomacy, disasters) add event kinds and simulation rules here.
 
+mod disasters;
 mod event;
 mod sim;
 mod state;
@@ -16,8 +17,8 @@ mod wonders;
 pub use event::{Cause, Event, EventKind, Flow, Grievance, PeaceTerms, Ruler};
 pub use sim::{HistoryInputs, HistoryJob};
 pub use state::{
-    BattleRecord, Dragon, HistoryState, LandmarkState, RealmState, Relation, SettlementState,
-    WarState,
+    BattleRecord, Dragon, Eruption, HistoryState, LandmarkState, RealmState, Relation,
+    SettlementState, WarState,
 };
 
 /// A finished history: the full event log and the snapshots that make

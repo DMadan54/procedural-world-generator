@@ -104,6 +104,15 @@ pub struct SettlementState {
     /// Goods passing through or arriving in the last trade season.
     pub trade: f32,
     pub hub: bool,
+    /// Ash, drought or ruin: no growth and poor harvests before this year.
+    pub hardship_until: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Eruption {
+    pub year: u32,
+    pub cell: u32,
+    pub name: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,8 +159,10 @@ pub struct HistoryState {
     pub relations: Vec<Relation>,
     pub wars: Vec<WarState>,
     pub battles: Vec<BattleRecord>,
-    /// Year-0 landmarks first, then ruins left by the Blight.
+    /// Year-0 landmarks first, then ruins left by the Blight and disasters.
     pub landmarks: Vec<LandmarkState>,
+    /// Every eruption so far, for the volcano glyphs.
+    pub eruptions: Vec<Eruption>,
     /// Per cell: under the Blight.
     pub blight: Vec<bool>,
 }
@@ -194,6 +205,7 @@ impl HistoryState {
                     alive: true,
                     trade: 0.0,
                     hub: false,
+                    hardship_until: 0,
                 })
                 .collect(),
             trade: Vec::new(),
@@ -215,6 +227,7 @@ impl HistoryState {
                 })
                 .collect(),
             blight: vec![false; realms.width * realms.height],
+            eruptions: Vec::new(),
         }
     }
 
@@ -297,6 +310,7 @@ impl HistoryState {
                     alive: true,
                     trade: 0.0,
                     hub: false,
+                    hardship_until: 0,
                 });
             }
             EventKind::SettlementGrew {
@@ -547,6 +561,46 @@ impl HistoryState {
             } => {
                 self.landmarks[*landmark as usize].holder = Some(*realm);
                 self.realms[*realm as usize].wealth += boon;
+            }
+            EventKind::VolcanoErupted { cell, name, .. } => {
+                self.eruptions.push(Eruption {
+                    year: event.year,
+                    cell: *cell,
+                    name: name.clone(),
+                });
+            }
+            EventKind::Earthquake { .. } => {}
+            EventKind::HardTimes {
+                settlements, until, ..
+            } => {
+                for &s in settlements {
+                    let st = &mut self.settlements[s as usize];
+                    st.hardship_until = st.hardship_until.max(*until);
+                }
+            }
+            EventKind::SettlementStruck {
+                settlement,
+                deaths,
+                abandoned,
+                ruin,
+                hook,
+                ..
+            } => {
+                let s = &mut self.settlements[*settlement as usize];
+                s.population = s.population.saturating_sub(*deaths);
+                if *abandoned {
+                    s.alive = false;
+                    let cell = s.cell;
+                    self.landmarks.push(LandmarkState {
+                        name: ruin.clone(),
+                        kind: LandmarkKind::FallenTown,
+                        cell,
+                        dragon: None,
+                        discovered_by: None,
+                        holder: None,
+                        hook: hook.clone(),
+                    });
+                }
             }
             EventKind::BlightSpread { cells, .. } => {
                 for &c in cells {

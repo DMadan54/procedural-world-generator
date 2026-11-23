@@ -159,6 +159,7 @@ pub fn landmark_rgb(kind: worldgen_core::landmarks::LandmarkKind) -> Rgb {
         LandmarkKind::LeylineNexus => [200, 120, 255],
         LandmarkKind::DrownedCity => [60, 170, 230],
         LandmarkKind::BlightedRuin => [60, 65, 20],
+        LandmarkKind::FallenTown => [90, 90, 90],
     }
 }
 

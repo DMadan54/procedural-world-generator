@@ -31,6 +31,8 @@ pub enum LandmarkKind {
     DrownedCity,
     /// A town the Blight emptied (made during history, never at year 0).
     BlightedRuin,
+    /// A town a volcano, earthquake or famine emptied (made during history).
+    FallenTown,
 }
 
 impl LandmarkKind {
@@ -45,6 +47,7 @@ impl LandmarkKind {
             LandmarkKind::LeylineNexus => "leyline nexus",
             LandmarkKind::DrownedCity => "drowned city",
             LandmarkKind::BlightedRuin => "blighted ruin",
+            LandmarkKind::FallenTown => "ruined town",
         }
     }
 }
@@ -441,7 +444,7 @@ impl<'a> Describer<'a> {
                 (name, hook)
             }
             // Blighted ruins only appear during history, with their own hook.
-            LandmarkKind::ElderRuin | LandmarkKind::BlightedRuin => {
+            LandmarkKind::ElderRuin | LandmarkKind::BlightedRuin | LandmarkKind::FallenTown => {
                 let name = match v {
                     0 => format!("the Ruins of {base}"),
                     1 => format!("the Broken Halls of {base}"),

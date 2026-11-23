@@ -13,8 +13,8 @@ use super::event::{Cause, Event, EventKind, Flow, Ruler};
 use super::state::HistoryState;
 use super::History;
 use crate::biome::Biomes;
-use crate::config::TradeConfig;
 use crate::config::WorldConfig;
+use crate::config::{DisasterConfig, TradeConfig};
 use crate::habitability::Habitability;
 use crate::landmarks::Landmarks;
 use crate::names::Language;
@@ -24,6 +24,7 @@ use crate::resources::{deposit_output, farming_yield, Deposit, Goods, Resource, 
 use crate::rng::{entity_rng, stage, unit_f32};
 use crate::roads::Roads;
 use crate::settlements::{Rank, Settlements};
+use crate::tectonics::TectonicMap;
 
 /// What the simulation needs to know about the world, copied in so the job
 /// can run while the world is borrowed elsewhere.
@@ -75,11 +76,17 @@ pub(super) struct Context {
     pub(super) blight_start: u32,
     /// Land cells, for capping the Blight's reach.
     pub(super) land_cells: u32,
+    pub(super) disasters: DisasterConfig,
+    /// Land cells where plates converge (volcanoes) and on any plate
+    /// boundary (earthquakes).
+    pub(super) volcano_sites: Vec<u32>,
+    pub(super) quake_sites: Vec<u32>,
 }
 
 /// Everything history is simulated from.
 pub struct HistoryInputs<'a> {
     pub config: &'a WorldConfig,
+    pub tectonics: &'a TectonicMap,
     pub biomes: &'a Biomes,
     pub habitability: &'a Habitability,
     pub peoples: &'a Peoples,
@@ -113,6 +120,7 @@ impl HistoryJob {
     pub fn new(input: &HistoryInputs) -> Self {
         let HistoryInputs {
             config,
+            tectonics,
             biomes,
             habitability,
             peoples,
@@ -176,6 +184,9 @@ impl HistoryJob {
                 150 + rng.next_u32() % 300
             },
             land_cells: biomes.biome.iter().filter(|b| !b.is_water()).count() as u32,
+            disasters: config.disasters.clone(),
+            volcano_sites: super::disasters::boundary_sites(tectonics, biomes, true),
+            quake_sites: super::disasters::boundary_sites(tectonics, biomes, false),
         };
         let initial = HistoryState::initial(realms, settlements, landmarks);
         let mut job = Self {
@@ -282,6 +293,7 @@ impl HistoryJob {
         }
         self.settlement_life(year, rng);
         self.landmark_life(year);
+        self.disasters(year);
         self.foundings(year, rng);
     }
 
@@ -302,7 +314,9 @@ impl HistoryJob {
             for r in Resource::ALL {
                 let mut made = self.ctx.output[s as usize][r.index()];
                 if r == Resource::Grain {
-                    made += self.ctx.farming[s as usize] * thousands;
+                    // Ash and drought ruin the harvest.
+                    let harvest = if year < st.hardship_until { 0.3 } else { 1.0 };
+                    made += self.ctx.farming[s as usize] * thousands * harvest;
                 }
                 balance[s as usize][r.index()] = made - r.consumption_per_thousand() * thousands;
             }
@@ -702,7 +716,10 @@ impl HistoryJob {
             // bad decades.
             // Trade lifts what a settlement can support, by up to half.
             let traded = (st.trade / (st.population as f32 / 1000.0).max(0.1)).min(1.0);
-            let capacity = self.ctx.capacity[s as usize].max(1.0) * (1.0 + 0.5 * traded);
+            // Hard times (ash, drought, a ruined harvest) halve what the land
+            // supports until they pass.
+            let hard = if year < st.hardship_until { 0.5 } else { 1.0 };
+            let capacity = self.ctx.capacity[s as usize].max(1.0) * (1.0 + 0.5 * traded) * hard;
             let before = st.population as f32;
             let growth = 0.25 * (1.0 - before / capacity) + (unit_f32(rng) - 0.5) * 0.16;
             let after = (before * (1.0 + growth)).round().max(20.0);

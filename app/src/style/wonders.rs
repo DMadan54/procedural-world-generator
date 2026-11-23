@@ -105,6 +105,7 @@ pub fn draw_landmarks(canvas: &mut Canvas, state: &HistoryState, s: f32) {
             LandmarkKind::DragonDen => dragon(canvas, at, k, pen, landmark.dragon),
             LandmarkKind::ElderRuin => columns(canvas, at, k, pen, INK),
             LandmarkKind::BlightedRuin => columns(canvas, at, k, pen, BLIGHT_INK),
+            LandmarkKind::FallenTown => columns(canvas, at, k, pen, INK),
             LandmarkKind::LeylineNexus => star(canvas, at, k, pen),
             LandmarkKind::DrownedCity => towers(canvas, at, k, pen),
         };

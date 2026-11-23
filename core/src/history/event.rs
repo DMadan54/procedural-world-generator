@@ -60,6 +60,8 @@ pub enum Cause {
     Disturbed,
     /// Someone delved where they should not have.
     Delving,
+    /// Plates grinding against each other deep below.
+    Tectonics,
     /// The direct consequence of an earlier event in the log.
     Event(u32),
 }
@@ -283,6 +285,37 @@ pub enum EventKind {
         hero: String,
         cost: f32,
     },
+    /// A volcano erupts where plates converge.
+    VolcanoErupted {
+        cell: u32,
+        /// The mountain's name, in the local tongue.
+        name: String,
+        cause: Cause,
+    },
+    /// The ground shakes along a plate boundary.
+    Earthquake {
+        cell: u32,
+        magnitude: f32,
+        cause: Cause,
+    },
+    /// Ash or ruined fields: these settlements can't grow, and grow less
+    /// grain, until `until`.
+    HardTimes {
+        settlements: Vec<u32>,
+        until: u32,
+        cause: Cause,
+    },
+    /// A disaster kills part of a settlement. If `abandoned`, the
+    /// survivors leave and it becomes a ruined-town landmark named `ruin`
+    /// with story `hook`.
+    SettlementStruck {
+        settlement: u32,
+        deaths: u32,
+        abandoned: bool,
+        ruin: String,
+        hook: String,
+        cause: Cause,
+    },
     /// The Blight reaches a settlement. If `abandoned`, it becomes a ruin
     /// (a new landmark named `ruin`).
     BlightReachedSettlement {
@@ -415,7 +448,9 @@ impl EventKind {
             | EventKind::Shortage { settlement, .. }
             | EventKind::Siege { settlement, .. }
             | EventKind::DragonRaid { settlement, .. }
-            | EventKind::BlightReachedSettlement { settlement, .. } => vec![*settlement],
+            | EventKind::BlightReachedSettlement { settlement, .. }
+            | EventKind::SettlementStruck { settlement, .. } => vec![*settlement],
+            EventKind::HardTimes { settlements, .. } => settlements.clone(),
             _ => Vec::new(),
         }
     }

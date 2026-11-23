@@ -162,6 +162,7 @@ impl World {
         });
         let history = HistoryJob::new(&HistoryInputs {
             config,
+            tectonics: &tectonics,
             biomes: &biomes,
             habitability: &habitability,
             peoples: &peoples,
@@ -243,6 +244,7 @@ impl World {
             || config.trade != old.trade
             || self.pending.history.is_some()
             || config.history != old.history
+            || config.disasters != old.disasters
             || config.politics.empire_formation != old.politics.empire_formation
             || config.politics.fragmentation_rate != old.politics.fragmentation_rate;
         let run = StagesRun {
@@ -424,6 +426,7 @@ impl World {
         if self.pending.history_restart {
             self.pending.history = Some(HistoryJob::new(&HistoryInputs {
                 config: &self.config,
+                tectonics: &self.tectonics,
                 biomes: &self.biomes,
                 habitability: &self.habitability,
                 peoples: &self.peoples,

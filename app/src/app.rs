@@ -653,6 +653,10 @@ impl WorldGenApp {
                         worldgen_core::landmarks::LandmarkKind::BlightedRuin,
                         "Town lost to the Blight",
                     ),
+                    (
+                        worldgen_core::landmarks::LandmarkKind::FallenTown,
+                        "Town lost to disaster",
+                    ),
                 ] {
                     legend_row(ui, render::landmark_rgb(kind), label);
                 }

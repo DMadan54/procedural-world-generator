@@ -33,6 +33,7 @@ pub mod stage {
     pub const NAMES_PERSON: &str = "names.person";
     pub const LANDMARKS: &str = "landmarks";
     pub const HISTORY_LANDMARKS: &str = "history.landmarks";
+    pub const HISTORY_DISASTERS: &str = "history.disasters";
 }
 
 const DOMAIN_STAGE: u64 = 0x5354_4147_4521_0001;
