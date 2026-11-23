@@ -34,6 +34,12 @@ browser.
 - **History with a time slider.** Scrub or play through the centuries and
   watch realms rise, split and fall; an event feed lists what happened and
   why, and the year shows in an antique cartouche.
+- **Chronicle.** The event log told as prose, chapter by century, with
+  causes followed back ("famine came to Vunvrumlum after the rains failed
+  around Vrobe"). Follows the time slider; filter by realm, people, house or
+  years; export as Markdown or a typeset HTML page, optionally with a
+  writers' appendix (gazetteer with story hooks, ruling houses, names split
+  into syllables).
 - **Export.** Save the map as it stands at any year as a PNG (1×, 2× or 4×,
   with a title cartouche, compass rose and scale bar), or the whole world as
   JSON: peoples, towns, realms, landmarks and the complete event log, ready

@@ -1,4 +1,5 @@
 mod app;
+mod chronicle_panel;
 mod export;
 mod link;
 mod render;

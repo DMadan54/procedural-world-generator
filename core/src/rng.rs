@@ -34,6 +34,7 @@ pub mod stage {
     pub const LANDMARKS: &str = "landmarks";
     pub const HISTORY_LANDMARKS: &str = "history.landmarks";
     pub const HISTORY_DISASTERS: &str = "history.disasters";
+    pub const CHRONICLE: &str = "chronicle";
 }
 
 const DOMAIN_STAGE: u64 = 0x5354_4147_4521_0001;

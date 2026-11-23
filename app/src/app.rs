@@ -141,6 +141,7 @@ pub struct WorldGenApp {
     export_scale: usize,
     export_decorations: bool,
     export_grids: bool,
+    chronicle: crate::chronicle_panel::ChroniclePanel,
     /// The config last written to the browser address bar.
     linked_config: Option<WorldConfig>,
     /// Finished-map styles; `style` picks one, or `None` for a debug view.
@@ -205,6 +206,7 @@ impl WorldGenApp {
             export_scale: 2,
             export_decorations: true,
             export_grids: false,
+            chronicle: Default::default(),
         }
     }
 
@@ -217,6 +219,7 @@ impl WorldGenApp {
         self.era.clear();
         self.timeline.selected = None;
         self.selected_realm = None;
+        self.chronicle.reset();
         self.timeline.year = self.timeline.year.min(self.world.history.years);
     }
 
@@ -451,6 +454,7 @@ impl WorldGenApp {
                 self.notice = Some("Link copied to the clipboard.".into());
             }
         });
+        ui.toggle_value(&mut self.chronicle.open, "Chronicle");
         egui::CollapsingHeader::new("Export")
             .default_open(false)
             .show(ui, |ui| self.export_controls(ui));
@@ -1726,5 +1730,8 @@ impl eframe::App for WorldGenApp {
         }
         self.central_panel(ctx);
         self.realm_window(ctx);
+        if self.history_ready() {
+            self.chronicle.show(ctx, &self.world, self.timeline.year);
+        }
     }
 }

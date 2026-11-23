@@ -15,6 +15,7 @@
 //! → settlements → resources → roads → realms → history.
 
 pub mod biome;
+pub mod chronicle;
 pub mod climate;
 pub mod config;
 pub mod erosion;
