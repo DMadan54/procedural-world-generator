@@ -202,6 +202,24 @@ fn settlement_name(names: &HistoryState, settlement: u32) -> String {
         .map_or_else(|| format!("settlement {settlement}"), |s| s.name.clone())
 }
 
+fn grievance_text(grievance: &worldgen_core::history::Grievance, names: &HistoryState) -> String {
+    use worldgen_core::history::Grievance;
+    match grievance {
+        Grievance::DisputedBorder { .. } => "a disputed border".into(),
+        Grievance::ContestedTradeRoute { from, to } => format!(
+            "the trade road from {} to {}",
+            settlement_name(names, *from),
+            settlement_name(names, *to)
+        ),
+        Grievance::SuccessionClaim { house } => format!("House {house}'s claim to the throne"),
+        Grievance::CulturalSplit => "old differences of custom and faith".into(),
+        Grievance::WeddingSlight { house } => {
+            format!("a slight to House {house} at a royal wedding")
+        }
+        Grievance::OldWar { .. } => "an old war never forgiven".into(),
+    }
+}
+
 fn cause_text(cause: Cause) -> &'static str {
     match cause {
         Cause::OldAge => " on the death of the old ruler",
@@ -325,6 +343,116 @@ pub fn describe(event: &Event, names: &HistoryState) -> String {
             settlement_name(names, *settlement),
             resource.name()
         ),
+        EventKind::OpinionsShifted { changes } => {
+            format!("Opinions shift between {} pairs of realms", changes.len())
+        }
+        EventKind::AllianceFormed { a, b, .. } => {
+            format!(
+                "{} and {} swear alliance",
+                realm_name(names, *a),
+                realm_name(names, *b)
+            )
+        }
+        EventKind::AllianceBroken { a, b, .. } => {
+            format!(
+                "The alliance of {} and {} breaks",
+                realm_name(names, *a),
+                realm_name(names, *b)
+            )
+        }
+        EventKind::RivalryDeclared { a, b, grievance } => format!(
+            "{} and {} become rivals over {}",
+            realm_name(names, *a),
+            realm_name(names, *b),
+            grievance_text(grievance, names)
+        ),
+        EventKind::TradePactSigned { a, b, .. } => {
+            format!(
+                "{} and {} sign a trade pact",
+                realm_name(names, *a),
+                realm_name(names, *b)
+            )
+        }
+        EventKind::MarriageArranged {
+            bride,
+            bride_house,
+            groom,
+            groom_house,
+            ..
+        } => {
+            format!("{bride} of House {bride_house} weds {groom} of House {groom_house}")
+        }
+        EventKind::VassalSworn {
+            vassal, overlord, ..
+        } => format!(
+            "{} bends the knee to {}",
+            realm_name(names, *vassal),
+            realm_name(names, *overlord)
+        ),
+        EventKind::VassalFreed {
+            vassal, overlord, ..
+        } => format!(
+            "{} throws off the rule of {}",
+            realm_name(names, *vassal),
+            realm_name(names, *overlord)
+        ),
+        EventKind::WarDeclared {
+            attacker,
+            defender,
+            grievance,
+            ..
+        } => format!(
+            "{} declares war on {} over {}",
+            realm_name(names, *attacker),
+            realm_name(names, *defender),
+            grievance_text(grievance, names)
+        ),
+        EventKind::WarJoined { realm, .. } => {
+            format!("{} joins the war", realm_name(names, *realm))
+        }
+        EventKind::Battle {
+            name,
+            attacker_won,
+            attacker_losses,
+            defender_losses,
+            ..
+        } => format!(
+            "{name}: the {} win; {} fall",
+            if *attacker_won {
+                "attackers"
+            } else {
+                "defenders"
+            },
+            attacker_losses + defender_losses
+        ),
+        EventKind::Siege {
+            settlement, fell, ..
+        } => format!(
+            "{} is besieged{}",
+            settlement_name(names, *settlement),
+            if *fell { " and falls" } else { " but holds" }
+        ),
+        EventKind::PeaceSigned { terms, .. } => format!(
+            "Peace: {} prevails{}{}",
+            realm_name(names, terms.victor),
+            if terms.vassalage {
+                ", the loser becoming a vassal"
+            } else {
+                ""
+            },
+            if terms.territory > 0 {
+                format!(", {} leagues change hands", terms.territory)
+            } else {
+                String::new()
+            }
+        ),
+        EventKind::RealmAnnexed { realm, by, .. } => {
+            format!(
+                "{} is annexed by {}",
+                realm_name(names, *realm),
+                realm_name(names, *by)
+            )
+        }
     }
 }
 

@@ -44,6 +44,18 @@ pub enum Cause {
     NoLongerNeeded,
     /// Goods flowed through a place in quantity.
     Trade,
+    /// Long goodwill between two realms.
+    Friendship,
+    /// Goodwill between allies soured.
+    Estrangement,
+    /// A powerful neighbour offered protection a weak realm couldn't refuse.
+    Protection,
+    /// A vassal grew strong enough, or its overlord weak enough, to break free.
+    Independence,
+    /// A long-held vassal was absorbed outright.
+    Absorption,
+    /// Ties of blood between ruling houses.
+    Alliance,
     /// The direct consequence of an earlier event in the log.
     Event(u32),
 }
@@ -138,6 +150,120 @@ pub enum EventKind {
         resource: Resource,
         cause: Cause,
     },
+    /// Opinions between realms drift (every few years): `(a, b, change)`.
+    OpinionsShifted {
+        changes: Vec<(u16, u16, f32)>,
+    },
+    AllianceFormed {
+        a: u16,
+        b: u16,
+        cause: Cause,
+    },
+    AllianceBroken {
+        a: u16,
+        b: u16,
+        cause: Cause,
+    },
+    RivalryDeclared {
+        a: u16,
+        b: u16,
+        grievance: Grievance,
+    },
+    TradePactSigned {
+        a: u16,
+        b: u16,
+        cause: Cause,
+    },
+    /// A marriage between the ruling houses of `a` (the bride's) and `b`.
+    MarriageArranged {
+        a: u16,
+        b: u16,
+        bride: String,
+        bride_house: String,
+        groom: String,
+        groom_house: String,
+        cause: Cause,
+    },
+    VassalSworn {
+        vassal: u16,
+        overlord: u16,
+        cause: Cause,
+    },
+    VassalFreed {
+        vassal: u16,
+        overlord: u16,
+        cause: Cause,
+    },
+    /// `war` is the index the war gets in `HistoryState::wars`.
+    WarDeclared {
+        war: u32,
+        attacker: u16,
+        defender: u16,
+        grievance: Grievance,
+    },
+    /// An ally takes up arms.
+    WarJoined {
+        war: u32,
+        realm: u16,
+        on_attacking_side: bool,
+        cause: Cause,
+    },
+    Battle {
+        war: u32,
+        name: String,
+        site: u32,
+        attacker_won: bool,
+        attacker_losses: u32,
+        defender_losses: u32,
+    },
+    Siege {
+        war: u32,
+        settlement: u32,
+        fell: bool,
+    },
+    PeaceSigned {
+        war: u32,
+        attacker: u16,
+        defender: u16,
+        terms: PeaceTerms,
+    },
+    /// A realm is swallowed whole by another.
+    RealmAnnexed {
+        realm: u16,
+        by: u16,
+        cause: Cause,
+    },
+}
+
+/// What a rivalry or war is about. Each names the place, route or house in
+/// question so chronicles can say exactly why.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Grievance {
+    /// Land both realms claim, near this cell.
+    DisputedBorder { cell: u32 },
+    /// A trade route between two settlements both want to control.
+    ContestedTradeRoute { from: u32, to: u32 },
+    /// A marriage gave this house a claim to the other's throne.
+    SuccessionClaim { house: String },
+    /// The realms' peoples have drifted apart in custom and faith.
+    CulturalSplit,
+    /// A slight at the wedding that joined these houses.
+    WeddingSlight { house: String },
+    /// An earlier war (index into the realms' wars) never forgiven.
+    OldWar { war: u32 },
+}
+
+/// What a peace settled.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PeaceTerms {
+    /// The side that came out ahead.
+    pub victor: u16,
+    /// Cells that changed hands during the war.
+    pub territory: u32,
+    /// Treasure the loser paid.
+    pub tribute: f32,
+    /// The loser bent the knee as a vassal.
+    pub vassalage: bool,
 }
 
 /// Goods moved in one trade season.
@@ -169,6 +295,29 @@ impl EventKind {
             | EventKind::RulerSucceeded { realm, .. }
             | EventKind::RealmFell { realm, .. } => vec![*realm],
             EventKind::BorderChanged { from, to, .. } => vec![*from, *to],
+            EventKind::AllianceFormed { a, b, .. }
+            | EventKind::AllianceBroken { a, b, .. }
+            | EventKind::RivalryDeclared { a, b, .. }
+            | EventKind::TradePactSigned { a, b, .. }
+            | EventKind::MarriageArranged { a, b, .. } => vec![*a, *b],
+            EventKind::VassalSworn {
+                vassal, overlord, ..
+            }
+            | EventKind::VassalFreed {
+                vassal, overlord, ..
+            } => {
+                vec![*vassal, *overlord]
+            }
+            EventKind::WarDeclared {
+                attacker, defender, ..
+            }
+            | EventKind::PeaceSigned {
+                attacker, defender, ..
+            } => {
+                vec![*attacker, *defender]
+            }
+            EventKind::WarJoined { realm, .. } => vec![*realm],
+            EventKind::RealmAnnexed { realm, by, .. } => vec![*realm, *by],
             EventKind::RealmSplit {
                 realm, new_realm, ..
             } => vec![*realm, *new_realm],
@@ -186,9 +335,9 @@ impl EventKind {
             EventKind::RealmSplit { capital, .. } => vec![*capital],
             EventKind::TradeRouteOpened { from, to, .. }
             | EventKind::TradeRouteClosed { from, to, .. } => vec![*from, *to],
-            EventKind::TradeHub { settlement, .. } | EventKind::Shortage { settlement, .. } => {
-                vec![*settlement]
-            }
+            EventKind::TradeHub { settlement, .. }
+            | EventKind::Shortage { settlement, .. }
+            | EventKind::Siege { settlement, .. } => vec![*settlement],
             _ => Vec::new(),
         }
     }
@@ -202,6 +351,7 @@ impl EventKind {
                 | EventKind::TradeSeason { .. }
                 | EventKind::TradeRouteOpened { .. }
                 | EventKind::TradeRouteClosed { .. }
+                | EventKind::OpinionsShifted { .. }
         )
     }
 }

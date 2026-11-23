@@ -10,10 +10,11 @@
 mod event;
 mod sim;
 mod state;
+mod war;
 
-pub use event::{Cause, Event, EventKind, Flow, Ruler};
+pub use event::{Cause, Event, EventKind, Flow, Grievance, PeaceTerms, Ruler};
 pub use sim::{HistoryInputs, HistoryJob};
-pub use state::{HistoryState, RealmState, SettlementState};
+pub use state::{BattleRecord, HistoryState, RealmState, Relation, SettlementState, WarState};
 
 /// A finished history: the full event log and the snapshots that make
 /// looking up any year fast.

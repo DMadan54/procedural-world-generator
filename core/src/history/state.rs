@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::event::{Event, EventKind, Flow, Ruler};
+use super::event::{Event, EventKind, Flow, Grievance, Ruler};
 use crate::realms::{Realms, NO_REALM};
 use crate::settlements::{Rank, Settlements};
 
@@ -24,6 +24,72 @@ pub struct RealmState {
     pub founded: u32,
     /// Treasure from tolls on trade through the realm's land.
     pub wealth: f32,
+    /// The realm this one is a vassal of.
+    pub overlord: Option<u16>,
+}
+
+/// How two realms stand with each other.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Relation {
+    /// Lower realm id first.
+    pub a: u16,
+    pub b: u16,
+    /// Goodwill, `-100..=100`.
+    pub opinion: f32,
+    pub alliance: bool,
+    /// The grievance, while the realms are rivals.
+    pub rivalry: Option<Grievance>,
+    pub trade_pact: bool,
+    /// The houses are joined by marriage.
+    pub marriage: bool,
+    /// No war before this year.
+    pub truce_until: u32,
+    /// The war they're fighting, by index into `HistoryState::wars`.
+    pub war: Option<u32>,
+    /// Wars fought between them so far.
+    pub wars_fought: u32,
+}
+
+impl Relation {
+    fn new(a: u16, b: u16) -> Self {
+        Self {
+            a: a.min(b),
+            b: a.max(b),
+            opinion: 0.0,
+            alliance: false,
+            rivalry: None,
+            trade_pact: false,
+            marriage: false,
+            truce_until: 0,
+            war: None,
+            wars_fought: 0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WarState {
+    pub attacker: u16,
+    pub defender: u16,
+    /// Everyone fighting on each side, leaders first.
+    pub attackers: Vec<u16>,
+    pub defenders: Vec<u16>,
+    pub grievance: Grievance,
+    pub started: u32,
+    pub ended: Option<u32>,
+    /// Battles won minus battles lost, from the attacker's side.
+    pub score: i32,
+    /// Cells that changed hands.
+    pub territory: u32,
+}
+
+/// A battle site, kept so maps can mark it for a while afterwards.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BattleRecord {
+    pub year: u32,
+    pub site: u32,
+    pub name: String,
+    pub war: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -56,6 +122,10 @@ pub struct HistoryState {
     pub trade: Vec<Flow>,
     /// Routes goods flow along regularly, as `(from, to)`, sorted.
     pub routes: Vec<(u32, u32)>,
+    /// Relations between realms that have any, sorted by `(a, b)`.
+    pub relations: Vec<Relation>,
+    pub wars: Vec<WarState>,
+    pub battles: Vec<BattleRecord>,
 }
 
 impl HistoryState {
@@ -81,6 +151,7 @@ impl HistoryState {
                     cells: r.cells,
                     founded: 0,
                     wealth: 0.0,
+                    overlord: None,
                 })
                 .collect(),
             settlements: settlements
@@ -99,6 +170,9 @@ impl HistoryState {
                 .collect(),
             trade: Vec::new(),
             routes: Vec::new(),
+            relations: Vec::new(),
+            wars: Vec::new(),
+            battles: Vec::new(),
         }
     }
 
@@ -107,6 +181,28 @@ impl HistoryState {
         self.settlements
             .get(settlement as usize)
             .map_or(NO_REALM, |s| self.owner[s.cell as usize])
+    }
+
+    /// The relation between two realms, if they have one.
+    pub fn relation(&self, a: u16, b: u16) -> Option<&Relation> {
+        let key = (a.min(b), a.max(b));
+        self.relations
+            .binary_search_by(|r| (r.a, r.b).cmp(&key))
+            .ok()
+            .map(|i| &self.relations[i])
+    }
+
+    /// The relation between two realms, created if missing.
+    pub fn relation_mut(&mut self, a: u16, b: u16) -> &mut Relation {
+        let key = (a.min(b), a.max(b));
+        let i = match self.relations.binary_search_by(|r| (r.a, r.b).cmp(&key)) {
+            Ok(i) => i,
+            Err(i) => {
+                self.relations.insert(i, Relation::new(a, b));
+                i
+            }
+        };
+        &mut self.relations[i]
     }
 
     pub fn living_realms(&self) -> impl Iterator<Item = (u16, &RealmState)> {
@@ -179,9 +275,15 @@ impl HistoryState {
                 self.settlements[*settlement as usize].name = name.clone();
             }
             EventKind::RealmFell { realm, .. } => {
+                for other in &mut self.realms {
+                    if other.overlord == Some(*realm) {
+                        other.overlord = None;
+                    }
+                }
                 let r = &mut self.realms[*realm as usize];
                 r.alive = false;
                 r.ruler = None;
+                r.overlord = None;
             }
             EventKind::RealmSplit {
                 realm,
@@ -213,6 +315,7 @@ impl HistoryState {
                     cells: n,
                     founded: event.year,
                     wealth: 0.0,
+                    overlord: None,
                 });
                 self.settlements[*capital as usize].rank = Rank::Capital;
             }
@@ -243,6 +346,129 @@ impl HistoryState {
                 self.settlements[*settlement as usize].hub = true;
             }
             EventKind::Shortage { .. } => {}
+            EventKind::OpinionsShifted { changes } => {
+                for &(a, b, change) in changes {
+                    let r = self.relation_mut(a, b);
+                    r.opinion = (r.opinion + change).clamp(-100.0, 100.0);
+                }
+            }
+            EventKind::AllianceFormed { a, b, .. } => self.relation_mut(*a, *b).alliance = true,
+            EventKind::AllianceBroken { a, b, .. } => self.relation_mut(*a, *b).alliance = false,
+            EventKind::RivalryDeclared { a, b, grievance } => {
+                self.relation_mut(*a, *b).rivalry = Some(grievance.clone());
+            }
+            EventKind::TradePactSigned { a, b, .. } => self.relation_mut(*a, *b).trade_pact = true,
+            EventKind::MarriageArranged { a, b, .. } => self.relation_mut(*a, *b).marriage = true,
+            EventKind::VassalSworn {
+                vassal, overlord, ..
+            } => {
+                self.realms[*vassal as usize].overlord = Some(*overlord);
+            }
+            EventKind::VassalFreed { vassal, .. } => self.realms[*vassal as usize].overlord = None,
+            EventKind::WarDeclared {
+                war,
+                attacker,
+                defender,
+                grievance,
+            } => {
+                debug_assert_eq!(*war as usize, self.wars.len());
+                self.wars.push(WarState {
+                    attacker: *attacker,
+                    defender: *defender,
+                    attackers: vec![*attacker],
+                    defenders: vec![*defender],
+                    grievance: grievance.clone(),
+                    started: event.year,
+                    ended: None,
+                    score: 0,
+                    territory: 0,
+                });
+                let r = self.relation_mut(*attacker, *defender);
+                r.war = Some(*war);
+                r.alliance = false;
+            }
+            EventKind::WarJoined {
+                war,
+                realm,
+                on_attacking_side,
+                ..
+            } => {
+                let w = &mut self.wars[*war as usize];
+                let (side, enemies) = if *on_attacking_side {
+                    (&mut w.attackers, w.defenders.clone())
+                } else {
+                    (&mut w.defenders, w.attackers.clone())
+                };
+                side.push(*realm);
+                for enemy in enemies {
+                    let r = self.relation_mut(*realm, enemy);
+                    r.war = Some(*war);
+                    r.alliance = false;
+                }
+            }
+            EventKind::Battle {
+                war,
+                name,
+                site,
+                attacker_won,
+                ..
+            } => {
+                let w = &mut self.wars[*war as usize];
+                w.score += if *attacker_won { 1 } else { -1 };
+                self.battles.push(BattleRecord {
+                    year: event.year,
+                    site: *site,
+                    name: name.clone(),
+                    war: *war,
+                });
+            }
+            EventKind::Siege { .. } => {}
+            EventKind::PeaceSigned { war, terms, .. } => {
+                let loser = {
+                    let w = &self.wars[*war as usize];
+                    if terms.victor == w.attacker {
+                        w.defender
+                    } else {
+                        w.attacker
+                    }
+                };
+                self.realms[loser as usize].wealth -= terms.tribute;
+                self.realms[terms.victor as usize].wealth += terms.tribute;
+                let w = &mut self.wars[*war as usize];
+                w.ended = Some(event.year);
+                w.territory = terms.territory;
+                let (attackers, defenders) = (w.attackers.clone(), w.defenders.clone());
+                for &x in &attackers {
+                    for &y in &defenders {
+                        let r = self.relation_mut(x, y);
+                        if r.war == Some(*war) {
+                            r.war = None;
+                            r.truce_until = event.year + 20;
+                            r.wars_fought += 1;
+                        }
+                    }
+                }
+            }
+            EventKind::RealmAnnexed { realm, by, .. } => {
+                let cells: Vec<usize> = (0..self.owner.len())
+                    .filter(|&c| self.owner[c] == *realm)
+                    .collect();
+                for &c in &cells {
+                    self.owner[c] = *by;
+                }
+                let n = cells.len() as u32;
+                self.realms[*by as usize].cells += n;
+                let r = &mut self.realms[*realm as usize];
+                r.cells = 0;
+                r.alive = false;
+                r.ruler = None;
+                r.overlord = None;
+                for other in &mut self.realms {
+                    if other.overlord == Some(*realm) {
+                        other.overlord = None;
+                    }
+                }
+            }
         }
     }
 }

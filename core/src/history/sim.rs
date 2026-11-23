@@ -27,38 +27,46 @@ use crate::settlements::{Rank, Settlements};
 /// What the simulation needs to know about the world, copied in so the job
 /// can run while the world is borrowed elsewhere.
 #[derive(Clone, Debug, PartialEq)]
-struct Context {
-    seed: u64,
-    width: usize,
-    height: usize,
-    habitability: Vec<f32>,
+pub(super) struct Context {
+    pub(super) seed: u64,
+    pub(super) width: usize,
+    pub(super) height: usize,
+    pub(super) habitability: Vec<f32>,
     /// Sea and lakes: never claimed.
-    water: Vec<bool>,
-    languages: Vec<Language>,
-    expansionism: Vec<f32>,
-    governments: Vec<Government>,
+    pub(super) water: Vec<bool>,
+    pub(super) languages: Vec<Language>,
+    pub(super) expansionism: Vec<f32>,
+    pub(super) governments: Vec<Government>,
     /// Good unsettled sites, best first.
-    candidates: Vec<u32>,
+    pub(super) candidates: Vec<u32>,
     /// Per settlement: the population its land can support. Growth slows
     /// as a settlement approaches it. Extended as settlements are founded.
-    capacity: Vec<f32>,
+    pub(super) capacity: Vec<f32>,
     /// Population a new settlement on perfect land could reach.
-    base_population: f32,
+    pub(super) base_population: f32,
     /// Minimum distance between settlements, in cells.
-    spacing: f32,
-    empire_formation: f32,
-    fragmentation: f32,
+    pub(super) spacing: f32,
+    pub(super) empire_formation: f32,
+    pub(super) fragmentation: f32,
     /// Per settlement: yearly output from deposits, and grain per 1000
     /// people from farmland. Extended as settlements are founded.
-    output: Vec<Goods>,
-    farming: Vec<f32>,
-    deposits: Vec<Deposit>,
-    catchment: f32,
+    pub(super) output: Vec<Goods>,
+    pub(super) farming: Vec<f32>,
+    pub(super) deposits: Vec<Deposit>,
+    pub(super) catchment: f32,
     /// The year-0 transport network (settlements founded later aren't on it).
-    roads: Roads,
-    trade: TradeConfig,
+    pub(super) roads: Roads,
+    pub(super) trade: TradeConfig,
     /// Settlements currently short of grain, so shortages are logged once.
-    short: std::collections::BTreeSet<u32>,
+    pub(super) short: std::collections::BTreeSet<u32>,
+    /// Travel cost per cell, for how hard ground is to attack over.
+    pub(super) travel_cost: Vec<f32>,
+    /// Per year-0 settlement: by a river crossing / on a mountain pass (for
+    /// naming battles).
+    pub(super) crossing: Vec<bool>,
+    pub(super) pass: Vec<bool>,
+    /// Per war: cells that changed hands in it so far.
+    pub(super) war_cells: Vec<u32>,
 }
 
 /// Everything history is simulated from.
@@ -71,24 +79,25 @@ pub struct HistoryInputs<'a> {
     pub resources: &'a Resources,
     pub roads: &'a Roads,
     pub realms: &'a Realms,
+    pub travel_cost: &'a [f32],
 }
 
 /// A history run in progress.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HistoryJob {
-    ctx: Context,
-    years: u32,
-    interval: u32,
-    initial: HistoryState,
-    state: HistoryState,
-    events: Vec<Event>,
-    snapshots: Vec<HistoryState>,
-    next_year: u32,
+    pub(super) ctx: Context,
+    pub(super) years: u32,
+    pub(super) interval: u32,
+    pub(super) initial: HistoryState,
+    pub(super) state: HistoryState,
+    pub(super) events: Vec<Event>,
+    pub(super) snapshots: Vec<HistoryState>,
+    pub(super) next_year: u32,
     /// Per realm: border cells sampled along each neighbour, refreshed every
     /// few years. `(neighbour or NO_REALM for wilderness, cell on our side)`.
-    frontiers: Vec<Vec<(u16, u32)>>,
+    pub(super) frontiers: Vec<Vec<(u16, u32)>>,
     /// Names handed out so far, per people (keeps successive names distinct).
-    names_used: Vec<u64>,
+    pub(super) names_used: Vec<u64>,
 }
 
 impl HistoryJob {
@@ -102,6 +111,7 @@ impl HistoryJob {
             resources,
             roads,
             realms,
+            travel_cost,
         } = *input;
         let (w, h) = (realms.width, realms.height);
         let spacing = config.settlements.min_spacing * w as f32 / 512.0;
@@ -137,6 +147,18 @@ impl HistoryJob {
             roads: roads.clone(),
             trade: config.trade.clone(),
             short: Default::default(),
+            travel_cost: travel_cost.to_vec(),
+            crossing: settlements
+                .settlements
+                .iter()
+                .map(|s| s.flags.river_crossing)
+                .collect(),
+            pass: settlements
+                .settlements
+                .iter()
+                .map(|s| s.flags.mountain_pass)
+                .collect(),
+            war_cells: Vec::new(),
         };
         let initial = HistoryState::initial(realms, settlements);
         let mut job = Self {
@@ -195,7 +217,7 @@ impl HistoryJob {
         }
     }
 
-    fn emit(&mut self, year: u32, kind: EventKind) -> u32 {
+    pub(super) fn emit(&mut self, year: u32, kind: EventKind) -> u32 {
         let seq = self
             .events
             .iter()
@@ -234,7 +256,8 @@ impl HistoryJob {
             self.frontiers = sample_frontiers(&self.state, &self.ctx.water);
         }
         self.successions(year, rng);
-        self.conquests(year, rng);
+        self.diplomacy(year, rng);
+        self.wars(year, rng);
         self.border_drift(year, rng);
         self.splits(year, rng);
         if year.is_multiple_of(self.ctx.trade.interval.max(1)) {
@@ -418,7 +441,7 @@ impl HistoryJob {
         self.ctx.short = short_now;
     }
 
-    fn next_name(&mut self, people: u16, kind: NameKind) -> String {
+    pub(super) fn next_name(&mut self, people: u16, kind: NameKind) -> String {
         let counter = &mut self.names_used[people as usize];
         *counter += 1;
         let language = &self.ctx.languages[people as usize];
@@ -472,7 +495,7 @@ impl HistoryJob {
     }
 
     /// Total population of each realm's settlements: its strength.
-    fn power(&self) -> Vec<f32> {
+    pub(super) fn power(&self) -> Vec<f32> {
         let mut power = vec![0.0f32; self.state.realms.len()];
         for s in self.state.settlements.iter().filter(|s| s.alive) {
             let owner = self.state.owner[s.cell as usize];
@@ -481,50 +504,6 @@ impl HistoryJob {
             }
         }
         power
-    }
-
-    /// A much stronger realm annexes a weak neighbour outright.
-    fn conquests(&mut self, year: u32, rng: &mut ChaCha8Rng) {
-        let chance = 0.006 * self.ctx.empire_formation;
-        for attacker in 0..self.state.realms.len() as u16 {
-            if !self.state.realms[attacker as usize].alive || unit_f32(rng) >= chance {
-                continue;
-            }
-            let power = self.power();
-            let mut targets: Vec<u16> = self.frontiers[attacker as usize]
-                .iter()
-                .map(|&(n, _)| n)
-                .filter(|&n| n != NO_REALM && self.state.realms[n as usize].alive)
-                .filter(|&n| power[attacker as usize] > 3.0 * power[n as usize])
-                .collect();
-            targets.sort_unstable();
-            targets.dedup();
-            let Some(&victim) = targets.get((rng.next_u32() as usize) % targets.len().max(1))
-            else {
-                continue;
-            };
-            let cells: Vec<u32> = (0..self.state.owner.len() as u32)
-                .filter(|&c| self.state.owner[c as usize] == victim)
-                .collect();
-            let border = self.emit(
-                year,
-                EventKind::BorderChanged {
-                    from: victim,
-                    to: attacker,
-                    cells: cells.clone(),
-                    cause: Cause::Conquest,
-                },
-            );
-            self.emit(
-                year,
-                EventKind::RealmFell {
-                    realm: victim,
-                    cause: Cause::Event(border),
-                },
-            );
-            self.rename_conquered(year, &cells, attacker, border, rng);
-            self.frontiers = sample_frontiers(&self.state, &self.ctx.water);
-        }
     }
 
     /// Frontiers creep: an expansionist realm takes a bite of a neighbour or
@@ -795,7 +774,7 @@ impl HistoryJob {
 }
 
 #[derive(Clone, Copy)]
-enum NameKind {
+pub(super) enum NameKind {
     Person,
     Place,
 }
@@ -831,7 +810,7 @@ fn candidate_sites(
 
 /// For each realm, up to a few cells along its border with each neighbour
 /// (and with wilderness), in cell order.
-fn sample_frontiers(state: &HistoryState, water: &[bool]) -> Vec<Vec<(u16, u32)>> {
+pub(super) fn sample_frontiers(state: &HistoryState, water: &[bool]) -> Vec<Vec<(u16, u32)>> {
     const PER_NEIGHBOUR: usize = 6;
     let (w, h) = (state.width, state.height);
     let mut found: Vec<Vec<(u16, u32)>> = vec![Vec::new(); state.realms.len()];
@@ -869,7 +848,7 @@ fn sample_frontiers(state: &HistoryState, water: &[bool]) -> Vec<Vec<(u16, u32)>
 
 /// Breadth-first from `start` (a cell of the grabbing realm) into `target`'s
 /// cells (or wilderness), up to `size` cells, never taking `protect`.
-fn grab(
+pub(super) fn grab(
     state: &HistoryState,
     water: &[bool],
     start: u32,
