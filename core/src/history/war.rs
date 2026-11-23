@@ -727,8 +727,11 @@ impl HistoryJob {
                 }
             }
             None => {
+                // Fields are named by region, so battles fought over the same
+                // ground share a name.
                 let people = self.state.realms[defender as usize].people;
-                let field = self.next_name(people, NameKind::Place);
+                let region = (sx / 16.0) as u64 * 1024 + (sy / 16.0) as u64;
+                let field = self.ctx.languages[people as usize].place_name(2_000_000 + region);
                 format!("Battle of the {field} Fields")
             }
         }

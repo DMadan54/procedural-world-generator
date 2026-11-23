@@ -405,3 +405,60 @@ fn draw_arched(canvas: &mut Canvas, cells: &[[f32; 2]], name: &str, s: f32, styl
         t += a + gap;
     }
 }
+
+/// Crossed swords where battles were fought in the last 30 years, fading
+/// with age; the most recent are named in small italic.
+pub fn draw_battles(canvas: &mut Canvas, state: &HistoryState, s: f32) {
+    const FADE_YEARS: f32 = 30.0;
+    let w = state.width;
+    for battle in &state.battles {
+        let age = state.year.saturating_sub(battle.year) as f32;
+        if age > FADE_YEARS {
+            continue;
+        }
+        let alpha = 1.0 - age / FADE_YEARS;
+        let (x, y) = (
+            ((battle.site as usize % w) as f32 + 0.5) * s,
+            ((battle.site as usize / w) as f32 + 0.5) * s,
+        );
+        let k = 1.6 * s;
+        let red = [0.55, 0.12, 0.08];
+        // Two blades crossing, each with a short crossguard.
+        for (dx, guard) in [(1.0f32, 1.0f32), (-1.0, -1.0)] {
+            let (tip, hilt) = ([x + dx * k, y - k], [x - dx * k, y + k]);
+            canvas.line(hilt, tip, 0.35 * s, red, alpha);
+            let g = [x - dx * 0.55 * k, y + 0.55 * k];
+            canvas.line(
+                [g[0] - 0.35 * k * guard, g[1] - 0.35 * k],
+                [g[0] + 0.35 * k * guard, g[1] + 0.35 * k],
+                0.3 * s,
+                red,
+                alpha,
+            );
+        }
+        // Only the latest battle in a neighbourhood is named, so repeated
+        // fighting over one place doesn't stack labels.
+        let later_nearby = state.battles.iter().any(|b| {
+            b.year > battle.year || (b.year == battle.year && b.site > battle.site)
+        } && {
+            let (bx, by) = ((b.site as usize % w) as f32, (b.site as usize / w) as f32);
+            let (ax, ay) = ((battle.site as usize % w) as f32, (battle.site as usize / w) as f32);
+            (bx - ax).powi(2) + (by - ay).powi(2) < 100.0
+        } && state.year >= b.year);
+        if age <= 12.0 && !later_nearby {
+            let size = 4.8 * s;
+            let m = text::measure(&battle.name, Face::Italic, size, 0.0);
+            let origin = [x - m.width / 2.0, y + k + m.ascent + 0.4 * s];
+            text::draw(
+                canvas,
+                &battle.name,
+                Face::Italic,
+                size,
+                0.0,
+                origin,
+                red,
+                Some(PAPER),
+            );
+        }
+    }
+}

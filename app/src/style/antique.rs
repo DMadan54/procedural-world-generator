@@ -251,6 +251,7 @@ impl MapStyle for AntiqueStyle {
         lettering::draw_realm_names(&mut canvas, state, s);
         lettering::draw_people_names(&mut canvas, world, state, s);
         lettering::draw_settlements(&mut canvas, state, s);
+        lettering::draw_battles(&mut canvas, state, s);
         lettering::draw_settlement_labels(&mut canvas, world, state, s);
         frame(&mut canvas, s);
         canvas

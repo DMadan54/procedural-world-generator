@@ -64,10 +64,12 @@ enum DebugView {
     Network,
     /// History stage: trade flows at the slider year.
     Trade,
+    /// History stage: alliances, wars, pacts and vassals at the slider year.
+    Diplomacy,
 }
 
 impl DebugView {
-    const ALL: [DebugView; 19] = [
+    const ALL: [DebugView; 20] = [
         DebugView::Terrain,
         DebugView::Plates,
         DebugView::TectonicRelief,
@@ -87,6 +89,7 @@ impl DebugView {
         DebugView::Resources,
         DebugView::Network,
         DebugView::Trade,
+        DebugView::Diplomacy,
     ];
 
     fn label(self) -> &'static str {
@@ -110,6 +113,7 @@ impl DebugView {
             DebugView::Resources => "Resources",
             DebugView::Network => "Roads and sea lanes",
             DebugView::Trade => "Trade by year",
+            DebugView::Diplomacy => "Diplomacy by year",
         }
     }
 }
@@ -146,6 +150,8 @@ pub struct WorldGenApp {
     /// The age the cartouche counts years in, named in the dominant people's
     /// language.
     era: String,
+    /// The realm whose details window is open.
+    selected_realm: Option<u16>,
 }
 
 impl WorldGenApp {
@@ -181,6 +187,7 @@ impl WorldGenApp {
             landscape: None,
             names: None,
             era: String::new(),
+            selected_realm: None,
         }
     }
 
@@ -192,6 +199,7 @@ impl WorldGenApp {
         self.names = None;
         self.era.clear();
         self.timeline.selected = None;
+        self.selected_realm = None;
         self.timeline.year = self.timeline.year.min(self.world.history.years);
     }
 
@@ -323,7 +331,9 @@ impl WorldGenApp {
             DebugView::Habitability => render::habitability(&self.world),
             DebugView::Peoples | DebugView::Settlements => render::peoples(&self.world),
             DebugView::Realms => render::realms(&self.world),
-            DebugView::HistoryRealms => render::realms_at(&self.world, state),
+            DebugView::HistoryRealms | DebugView::Diplomacy => {
+                render::realms_at(&self.world, state)
+            }
             DebugView::Resources | DebugView::Network | DebugView::Trade => {
                 render::wind_background(map, sea)
             }
@@ -614,6 +624,18 @@ impl WorldGenApp {
                     }
                 }
             }
+            Some(DebugView::Diplomacy) => {
+                for (colour, label) in [
+                    ([40, 160, 60], "Alliance"),
+                    ([200, 30, 20], "War"),
+                    ([210, 160, 30], "Trade pact"),
+                    ([230, 120, 40], "Rivalry"),
+                    ([120, 60, 160], "Vassal to overlord (dashed)"),
+                ] {
+                    legend_row(ui, colour, label);
+                }
+                ui.weak("Click a realm on any map for its relations, wars and rulers.");
+            }
             Some(DebugView::Biomes) => {
                 ui.weak("Share of land");
                 for (biome, share) in self.world.biomes.coverage() {
@@ -771,7 +793,9 @@ impl WorldGenApp {
 
     fn central_panel(&mut self, ctx: &egui::Context) {
         self.update_texture(ctx);
-        let texture = self.texture.as_ref().expect("texture was just created");
+        // A cheap handle clone, so the panel closure doesn't hold a borrow of
+        // `self.texture` while it also needs `self` mutably (for clicks).
+        let texture = self.texture.clone().expect("texture was just created");
 
         egui::CentralPanel::default().show(ctx, |ui| {
             let panel = ui.available_rect_before_wrap();
@@ -779,10 +803,26 @@ impl WorldGenApp {
             // Fit the whole image in the panel, keeping its aspect ratio.
             let scale = (panel.width() / w).min(panel.height() / h);
             let rect = Rect::from_center_size(panel.center(), egui::vec2(w * scale, h * scale));
-            egui::Image::new(texture).paint_at(ui, rect);
-            let response = ui.allocate_rect(rect, egui::Sense::hover());
+            egui::Image::new(&texture).paint_at(ui, rect);
+            let response = ui.allocate_rect(rect, egui::Sense::click());
             if let Some(pointer) = response.hover_pos() {
                 self.settlement_tooltip(&response, rect, pointer);
+            }
+            if response.clicked() {
+                if let (Some(pointer), Some(state)) = (response.interact_pointer_pos(), &self.state)
+                {
+                    let w = state.width.max(1);
+                    let cell = rect.width() / w as f32;
+                    let (x, y) = (
+                        ((pointer.x - rect.left()) / cell) as usize,
+                        ((pointer.y - rect.top()) / cell) as usize,
+                    );
+                    if x < w && y < state.height {
+                        let owner = state.owner[y * w + x];
+                        self.selected_realm =
+                            (owner != worldgen_core::realms::NO_REALM).then_some(owner);
+                    }
+                }
             }
 
             let debug_view = if self.style.is_none() {
@@ -799,6 +839,7 @@ impl WorldGenApp {
                 Some(DebugView::Resources) => self.draw_deposits(ui.painter(), rect),
                 Some(DebugView::Network) => self.draw_network(ui.painter(), rect),
                 Some(DebugView::Trade) => self.draw_trade(ui.painter(), rect),
+                Some(DebugView::Diplomacy) => self.draw_diplomacy(ui.painter(), rect),
                 Some(DebugView::Wind) => self.draw_wind_arrows(ui.painter(), rect),
                 Some(DebugView::Terrain | DebugView::Drainage) if !self.before_erosion => {
                     self.draw_rivers(ui.painter(), rect)
@@ -939,6 +980,196 @@ impl WorldGenApp {
             ));
         }
         self.draw_settlement_markers(painter, rect);
+    }
+
+    /// Lines between capitals for each relation at the slider year.
+    fn draw_diplomacy(&self, painter: &egui::Painter, rect: Rect) {
+        let Some(state) = &self.state else {
+            return;
+        };
+        let capital = |r: u16| {
+            let realm = &state.realms[r as usize];
+            self.to_screen(rect, state.settlements[realm.capital as usize].cell)
+        };
+        for rel in &state.relations {
+            let (a, b) = (&state.realms[rel.a as usize], &state.realms[rel.b as usize]);
+            if !a.alive || !b.alive {
+                continue;
+            }
+            let colour: Option<(Rgb, f32)> = if rel.war.is_some() {
+                Some(([200, 30, 20], 3.0))
+            } else if rel.alliance {
+                Some(([40, 160, 60], 2.5))
+            } else if rel.trade_pact {
+                Some(([210, 160, 30], 2.0))
+            } else if rel.rivalry.is_some() {
+                Some(([230, 120, 40], 1.2))
+            } else {
+                None
+            };
+            if let Some(([r, g, bl], width)) = colour {
+                painter.line_segment(
+                    [capital(rel.a), capital(rel.b)],
+                    Stroke::new(width, Color32::from_rgb(r, g, bl)),
+                );
+            }
+        }
+        for (id, realm) in state.living_realms() {
+            if let Some(overlord) = realm.overlord {
+                let stroke = Stroke::new(2.0_f32, Color32::from_rgb(120, 60, 160));
+                painter.extend(egui::Shape::dashed_line(
+                    &[capital(id), capital(overlord)],
+                    stroke,
+                    6.0,
+                    4.0,
+                ));
+            }
+        }
+        for (id, _) in state.living_realms() {
+            painter.circle_filled(capital(id), 4.0_f32, Color32::BLACK);
+        }
+    }
+
+    /// The selected realm's ruler, standing, relations, wars and rulers.
+    fn realm_window(&mut self, ctx: &egui::Context) {
+        let (Some(id), Some(state)) = (self.selected_realm, &self.state) else {
+            return;
+        };
+        let Some(realm) = state.realms.get(id as usize) else {
+            return;
+        };
+        let names = self.names.as_ref().unwrap_or(state);
+        let mut open = true;
+        egui::Window::new(&realm.name)
+            .id(egui::Id::new("realm_window"))
+            .open(&mut open)
+            .default_width(340.0)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(500.0)
+                    .show(ui, |ui| {
+                        let people = &self.world.peoples.peoples[realm.people as usize];
+                        ui.label(format!(
+                            "People: {} ({})",
+                            people.name,
+                            people.trait_.name()
+                        ));
+                        match &realm.ruler {
+                            Some(r) => ui.label(format!(
+                                "Ruler: {} of House {}, born {}",
+                                r.name, r.house, r.born
+                            )),
+                            None => ui.label(if realm.alive {
+                                "No ruler"
+                            } else {
+                                "This realm has fallen"
+                            }),
+                        };
+                        ui.label(format!(
+                            "Land: {} leagues   Treasure: {:.0}",
+                            realm.cells, realm.wealth
+                        ));
+                        if let Some(o) = realm.overlord {
+                            ui.label(format!("Vassal of {}", state.realms[o as usize].name));
+                        }
+                        let vassals: Vec<&str> = state
+                            .living_realms()
+                            .filter(|(_, r)| r.overlord == Some(id))
+                            .map(|(_, r)| r.name.as_str())
+                            .collect();
+                        if !vassals.is_empty() {
+                            ui.label(format!("Vassals: {}", vassals.join(", ")));
+                        }
+
+                        ui.separator();
+                        ui.strong("Relations");
+                        let mut relations: Vec<_> = state
+                            .relations
+                            .iter()
+                            .filter(|r| r.a == id || r.b == id)
+                            .collect();
+                        relations.sort_by(|a, b| b.opinion.total_cmp(&a.opinion));
+                        for r in relations {
+                            let other = if r.a == id { r.b } else { r.a };
+                            let mut tags = Vec::new();
+                            if r.war.is_some() {
+                                tags.push("at war");
+                            }
+                            if r.alliance {
+                                tags.push("allied");
+                            }
+                            if r.rivalry.is_some() {
+                                tags.push("rivals");
+                            }
+                            if r.trade_pact {
+                                tags.push("trade pact");
+                            }
+                            if r.marriage {
+                                tags.push("royal marriage");
+                            }
+                            ui.label(format!(
+                                "{}: {:+.0} {}",
+                                state.realms[other as usize].name,
+                                r.opinion,
+                                tags.join(", ")
+                            ));
+                        }
+
+                        ui.separator();
+                        ui.strong("Wars");
+                        for w in state
+                            .wars
+                            .iter()
+                            .filter(|w| w.attackers.contains(&id) || w.defenders.contains(&id))
+                        {
+                            let enemy = if w.attackers.contains(&id) {
+                                w.defender
+                            } else {
+                                w.attacker
+                            };
+                            let end = w.ended.map_or("ongoing".to_owned(), |y| y.to_string());
+                            ui.label(format!(
+                                "{}–{}: against {}",
+                                w.started, end, names.realms[enemy as usize].name
+                            ));
+                        }
+
+                        ui.separator();
+                        ui.strong("Rulers");
+                        for e in self
+                            .world
+                            .history
+                            .events
+                            .iter()
+                            .take_while(|e| e.year <= state.year)
+                        {
+                            use worldgen_core::history::EventKind;
+                            match &e.kind {
+                                EventKind::RealmFounded { realm, ruler, .. }
+                                | EventKind::RulerSucceeded { realm, ruler, .. }
+                                    if *realm == id =>
+                                {
+                                    ui.label(format!(
+                                        "{}  {} of House {}",
+                                        e.year, ruler.name, ruler.house
+                                    ));
+                                }
+                                EventKind::RealmSplit {
+                                    new_realm, ruler, ..
+                                } if *new_realm == id => {
+                                    ui.label(format!(
+                                        "{}  {} of House {} (founder)",
+                                        e.year, ruler.name, ruler.house
+                                    ));
+                                }
+                                _ => {}
+                            }
+                        }
+                    });
+            });
+        if !open {
+            self.selected_realm = None;
+        }
     }
 
     fn draw_trade(&self, painter: &egui::Painter, rect: Rect) {
@@ -1257,10 +1488,14 @@ impl eframe::App for WorldGenApp {
                 year_changed |= self.timeline.show_feed(ctx, &self.world.history, names);
             }
         }
-        let yearly = matches!(self.view, DebugView::HistoryRealms | DebugView::Trade);
+        let yearly = matches!(
+            self.view,
+            DebugView::HistoryRealms | DebugView::Trade | DebugView::Diplomacy
+        );
         if year_changed && (self.style.is_some() || yearly) {
             self.texture_dirty = true;
         }
         self.central_panel(ctx);
+        self.realm_window(ctx);
     }
 }
