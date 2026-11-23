@@ -36,6 +36,7 @@ pub mod roads;
 pub mod settlements;
 pub mod share;
 pub mod tectonics;
+pub mod timelapse;
 pub mod travel;
 pub mod world;
 
