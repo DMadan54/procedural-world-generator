@@ -11,11 +11,37 @@ use rand_chacha::ChaCha8Rng;
 
 use super::event::{Cause, EventKind, Ruler};
 use super::sim::{HistoryJob, NameKind};
-use crate::biome::Biomes;
+use crate::biome::{Biome, Biomes};
 use crate::config::Disaster;
 use crate::realms::NO_REALM;
 use crate::rng::{entity_rng, stage, unit_f32};
 use crate::tectonics::{BoundaryKind, TectonicMap, NO_BOUNDARY};
+
+/// Where droughts start, as `(cell, cumulative weight)` on a coarse grid:
+/// dry grassland, scrub and savanna most, deserts (too dry to farm) and wet
+/// forests least.
+pub(super) fn drought_sites(biomes: &Biomes) -> Vec<(u32, f32)> {
+    let (w, h) = (biomes.width, biomes.height);
+    let mut total = 0.0;
+    let mut out = Vec::new();
+    for y in (0..h).step_by(4) {
+        for x in (0..w).step_by(4) {
+            let i = y * w + x;
+            let weight = match biomes.biome[i] {
+                Biome::Grassland | Biome::Shrubland | Biome::Savanna => 4.0,
+                Biome::Desert => 1.0,
+                Biome::TemperateForest | Biome::BorealForest | Biome::TropicalForest => 0.6,
+                b if b.is_water() => 0.0,
+                _ => 0.3,
+            };
+            if weight > 0.0 {
+                total += weight;
+                out.push((i as u32, total));
+            }
+        }
+    }
+    out
+}
 
 /// Land cells on a plate boundary: convergent ones only if `convergent`.
 pub(super) fn boundary_sites(
@@ -54,6 +80,11 @@ impl HistoryJob {
         for _ in 0..occurrences(&self.ctx.disasters.earthquakes.clone(), rng) {
             self.earthquake(year, rng);
         }
+        for _ in 0..occurrences(&self.ctx.disasters.droughts.clone(), rng) {
+            self.drought(year, rng);
+        }
+        self.sieges_ruin_harvests(year);
+        self.famines(year, rng);
     }
 
     fn reference(&self) -> f32 {
@@ -192,14 +223,165 @@ impl HistoryJob {
         }
         if !ashen.is_empty() {
             let until = year + 20 + rng.next_u32() % 20;
-            self.emit(
+            self.hard_times(year, ashen, until, Cause::Event(eruption));
+        }
+        // A great eruption darkens the sky: a year without summer far around.
+        if unit_f32(rng) < 0.3 {
+            let summerless: Vec<u32> = self
+                .settlements_near(cell, 90.0 * reference)
+                .into_iter()
+                .map(|(s, _)| s)
+                .collect();
+            if !summerless.is_empty() {
+                self.hard_times(year, summerless, year + 2, Cause::Event(eruption));
+            }
+        }
+    }
+
+    /// Logs hard times and remembers which event caused them, so famines
+    /// can point back to it.
+    fn hard_times(&mut self, year: u32, settlements: Vec<u32>, until: u32, cause: Cause) {
+        let event = self.emit(
+            year,
+            EventKind::HardTimes {
+                settlements: settlements.clone(),
+                until,
+                cause,
+            },
+        );
+        for s in settlements {
+            self.ctx.hardship_cause.insert(s, event);
+        }
+    }
+
+    /// A drought, most likely in dry grassland, scrub and savanna: the
+    /// harvests of every town in reach fail for a few years.
+    fn drought(&mut self, year: u32, rng: &mut ChaCha8Rng) {
+        let Some(&(_, total)) = self.ctx.drought_sites.last() else {
+            return;
+        };
+        let pick = unit_f32(rng) * total;
+        let at = self
+            .ctx
+            .drought_sites
+            .partition_point(|&(_, cum)| cum <= pick);
+        let cell = self.ctx.drought_sites[at.min(self.ctx.drought_sites.len() - 1)].0;
+        let radius = (25.0 + 25.0 * unit_f32(rng)) * self.reference();
+        let drought = self.emit(
+            year,
+            EventKind::Drought {
+                cell,
+                radius,
+                cause: Cause::Weather,
+            },
+        );
+        let parched: Vec<u32> = self
+            .settlements_near(cell, radius)
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect();
+        if !parched.is_empty() {
+            let until = year + 3 + rng.next_u32() % 5;
+            self.hard_times(year, parched, until, Cause::Event(drought));
+        }
+    }
+
+    /// A town that falls to a siege loses its harvest.
+    fn sieges_ruin_harvests(&mut self, year: u32) {
+        let first = self.events.partition_point(|e| e.year < year);
+        let fallen: Vec<(u32, u32)> = self.events[first..]
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| match e.kind {
+                EventKind::Siege {
+                    settlement,
+                    fell: true,
+                    ..
+                } => Some((settlement, (first + i) as u32)),
+                _ => None,
+            })
+            .collect();
+        for (settlement, siege) in fallen {
+            if self.state.settlements[settlement as usize].alive {
+                self.hard_times(year, vec![settlement], year + 4, Cause::Event(siege));
+            }
+        }
+    }
+
+    /// Towns in hard times that also can't buy grain starve. Survivors walk
+    /// to the nearest town with food; a realm whose capital starves may
+    /// rise against its ruler.
+    fn famines(&mut self, year: u32, rng: &mut ChaCha8Rng) {
+        for s in 0..self.state.settlements.len() as u32 {
+            let st = &self.state.settlements[s as usize];
+            if !st.alive || year >= st.hardship_until || !self.ctx.short.contains(&s) {
+                continue;
+            }
+            if self.ctx.last_famine.get(&s).is_some_and(|&y| year < y + 10) {
+                continue;
+            }
+            let cause = self
+                .ctx
+                .hardship_cause
+                .get(&s)
+                .map_or(Cause::Hardship, |&e| Cause::Event(e));
+            let deaths = (st.population as f32 * (0.08 + 0.15 * unit_f32(rng))) as u32;
+            let famine = self.emit(
                 year,
-                EventKind::HardTimes {
-                    settlements: ashen,
-                    until,
-                    cause: Cause::Event(eruption),
+                EventKind::Famine {
+                    settlement: s,
+                    deaths,
+                    cause,
                 },
             );
+            self.ctx.last_famine.insert(s, year);
+            // The hungry leave for the nearest town with food to spare.
+            let from_cell = self.state.settlements[s as usize].cell;
+            let refuge = (0..self.state.settlements.len() as u32)
+                .filter(|&t| {
+                    let other = &self.state.settlements[t as usize];
+                    t != s
+                        && other.alive
+                        && year >= other.hardship_until
+                        && !self.ctx.short.contains(&t)
+                })
+                .map(|t| {
+                    let n = self.ctx.roads.settlement_count as u32;
+                    let by_road = if s < n && t < n {
+                        self.ctx.roads.distance(s, t)
+                    } else {
+                        f32::INFINITY
+                    };
+                    let d = if by_road.is_finite() {
+                        by_road
+                    } else {
+                        // Off the network: overland, as the crow flies but slower.
+                        3.0 * self.distance(from_cell, self.state.settlements[t as usize].cell)
+                    };
+                    (t, d)
+                })
+                .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+            let left = self.state.settlements[s as usize].population;
+            if let Some((to, _)) = refuge {
+                let people = (left as f32 * (0.15 + 0.15 * unit_f32(rng))) as u32;
+                if people > 0 {
+                    self.emit(
+                        year,
+                        EventKind::Migration {
+                            from: s,
+                            to,
+                            people,
+                            cause: Cause::Event(famine),
+                        },
+                    );
+                }
+            }
+            // Revolt: a starving capital turns on its ruler.
+            if let Some(realm) = self.is_capital(s) {
+                if self.state.realms[realm as usize].ruler.is_some() && unit_f32(rng) < 0.35 {
+                    self.topple(year, realm, Cause::Event(famine), rng);
+                }
+            }
         }
     }
 
@@ -324,6 +506,45 @@ mod tests {
             (quakes - 120.0).abs() < 44.0,
             "{quakes} earthquakes in 40 centuries"
         );
+    }
+
+    #[test]
+    fn famines_and_migrations_trace_back_to_their_causes() {
+        let mut famines = 0;
+        for seed in [1, 2, 42] {
+            let mut c = config(seed);
+            c.disasters.droughts.per_century = 6.0;
+            let world = World::generate(&c);
+            let events = &world.history.events;
+            for e in events {
+                match &e.kind {
+                    EventKind::Famine {
+                        settlement, cause, ..
+                    } => {
+                        famines += 1;
+                        let crate::history::Cause::Event(i) = cause else {
+                            panic!("famine without a cause");
+                        };
+                        let EventKind::HardTimes { settlements, .. } = &events[*i as usize].kind
+                        else {
+                            panic!("famine caused by {:?}", events[*i as usize].kind);
+                        };
+                        assert!(settlements.contains(settlement));
+                    }
+                    EventKind::Migration { from, cause, .. } => {
+                        let crate::history::Cause::Event(i) = cause else {
+                            panic!("migration without a cause");
+                        };
+                        assert!(matches!(
+                            events[*i as usize].kind,
+                            EventKind::Famine { settlement, .. } if settlement == *from
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(famines > 0, "no famines at all");
     }
 
     #[test]

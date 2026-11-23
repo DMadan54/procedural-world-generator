@@ -81,6 +81,12 @@ pub(super) struct Context {
     /// boundary (earthquakes).
     pub(super) volcano_sites: Vec<u32>,
     pub(super) quake_sites: Vec<u32>,
+    /// Drought sites, `(cell, cumulative weight)`.
+    pub(super) drought_sites: Vec<(u32, f32)>,
+    /// Per settlement: the event behind its latest hard times.
+    pub(super) hardship_cause: std::collections::BTreeMap<u32, u32>,
+    /// Per settlement: the year of its latest famine.
+    pub(super) last_famine: std::collections::BTreeMap<u32, u32>,
 }
 
 /// Everything history is simulated from.
@@ -187,6 +193,9 @@ impl HistoryJob {
             disasters: config.disasters.clone(),
             volcano_sites: super::disasters::boundary_sites(tectonics, biomes, true),
             quake_sites: super::disasters::boundary_sites(tectonics, biomes, false),
+            drought_sites: super::disasters::drought_sites(biomes),
+            hardship_cause: Default::default(),
+            last_famine: Default::default(),
         };
         let initial = HistoryState::initial(realms, settlements, landmarks);
         let mut job = Self {

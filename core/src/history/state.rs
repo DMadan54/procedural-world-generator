@@ -109,6 +109,14 @@ pub struct SettlementState {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MigrationRecord {
+    pub year: u32,
+    pub from: u32,
+    pub to: u32,
+    pub people: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Eruption {
     pub year: u32,
     pub cell: u32,
@@ -163,6 +171,8 @@ pub struct HistoryState {
     pub landmarks: Vec<LandmarkState>,
     /// Every eruption so far, for the volcano glyphs.
     pub eruptions: Vec<Eruption>,
+    /// Every migration so far, for the arrows on the map.
+    pub migrations: Vec<MigrationRecord>,
     /// Per cell: under the Blight.
     pub blight: Vec<bool>,
 }
@@ -228,6 +238,7 @@ impl HistoryState {
                 .collect(),
             blight: vec![false; realms.width * realms.height],
             eruptions: Vec::new(),
+            migrations: Vec::new(),
         }
     }
 
@@ -569,7 +580,27 @@ impl HistoryState {
                     name: name.clone(),
                 });
             }
-            EventKind::Earthquake { .. } => {}
+            EventKind::Earthquake { .. } | EventKind::Drought { .. } => {}
+            EventKind::Famine {
+                settlement, deaths, ..
+            } => {
+                let s = &mut self.settlements[*settlement as usize];
+                s.population = s.population.saturating_sub(*deaths);
+            }
+            EventKind::Migration {
+                from, to, people, ..
+            } => {
+                let f = &mut self.settlements[*from as usize];
+                let moved = (*people).min(f.population);
+                f.population -= moved;
+                self.settlements[*to as usize].population += moved;
+                self.migrations.push(MigrationRecord {
+                    year: event.year,
+                    from: *from,
+                    to: *to,
+                    people: moved,
+                });
+            }
             EventKind::HardTimes {
                 settlements, until, ..
             } => {

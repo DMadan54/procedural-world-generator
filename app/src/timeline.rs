@@ -529,6 +529,32 @@ pub fn describe(event: &Event, names: &HistoryState) -> String {
                 .map_or("the wilds", |s| s.name.as_str());
             format!("An earthquake of strength {magnitude:.1} shakes the land near {near}")
         }
+        EventKind::Drought { cell, .. } => {
+            let w = names.width.max(1);
+            let near = names
+                .settlements
+                .iter()
+                .filter(|s| s.alive)
+                .min_by_key(|s| {
+                    let (a, b) = (s.cell as usize, *cell as usize);
+                    (a % w).abs_diff(b % w).pow(2) + (a / w).abs_diff(b / w).pow(2)
+                })
+                .map_or("the wilds", |s| s.name.as_str());
+            format!("The rains fail around {near}")
+        }
+        EventKind::Famine {
+            settlement, deaths, ..
+        } => format!(
+            "Famine in {}: {deaths} starve",
+            settlement_name(names, *settlement)
+        ),
+        EventKind::Migration {
+            from, to, people, ..
+        } => format!(
+            "{people} people leave {} for {}",
+            settlement_name(names, *from),
+            settlement_name(names, *to)
+        ),
         EventKind::HardTimes { settlements, .. } => {
             format!(
                 "Hard years for {} settlements: ash and failed harvests",

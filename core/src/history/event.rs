@@ -62,6 +62,8 @@ pub enum Cause {
     Delving,
     /// Plates grinding against each other deep below.
     Tectonics,
+    /// The rains failed.
+    Weather,
     /// The direct consequence of an earlier event in the log.
     Event(u32),
 }
@@ -298,6 +300,25 @@ pub enum EventKind {
         magnitude: f32,
         cause: Cause,
     },
+    /// The rains fail around `cell`.
+    Drought {
+        cell: u32,
+        radius: f32,
+        cause: Cause,
+    },
+    /// A settlement in hard times that cannot buy grain starves.
+    Famine {
+        settlement: u32,
+        deaths: u32,
+        cause: Cause,
+    },
+    /// People leave a settlement for another (fleeing famine, mostly).
+    Migration {
+        from: u32,
+        to: u32,
+        people: u32,
+        cause: Cause,
+    },
     /// Ash or ruined fields: these settlements can't grow, and grow less
     /// grain, until `until`.
     HardTimes {
@@ -449,7 +470,9 @@ impl EventKind {
             | EventKind::Siege { settlement, .. }
             | EventKind::DragonRaid { settlement, .. }
             | EventKind::BlightReachedSettlement { settlement, .. }
-            | EventKind::SettlementStruck { settlement, .. } => vec![*settlement],
+            | EventKind::SettlementStruck { settlement, .. }
+            | EventKind::Famine { settlement, .. } => vec![*settlement],
+            EventKind::Migration { from, to, .. } => vec![*from, *to],
             EventKind::HardTimes { settlements, .. } => settlements.clone(),
             _ => Vec::new(),
         }
