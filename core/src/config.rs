@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Bump when a change makes existing configs produce different worlds (new
 /// RNG derivation, changed algorithm or defaults), so saved configs can be
 /// detected as coming from an older generator.
-pub const GENERATOR_VERSION: u32 = 8;
+pub const GENERATOR_VERSION: u32 = 9;
 
 pub const MIN_PLATES: usize = 8;
 pub const MAX_PLATES: usize = 40;
@@ -33,6 +33,7 @@ pub struct WorldConfig {
     pub travel: TravelConfig,
     pub peoples: PeoplesConfig,
     pub settlements: SettlementConfig,
+    pub resources: ResourceConfig,
     pub realms: RealmConfig,
     pub magic: MagicConfig,
     pub politics: PoliticsConfig,
@@ -59,6 +60,7 @@ impl Default for WorldConfig {
             travel: TravelConfig::default(),
             peoples: PeoplesConfig::default(),
             settlements: SettlementConfig::default(),
+            resources: ResourceConfig::default(),
             realms: RealmConfig::default(),
             magic: MagicConfig::default(),
             politics: PoliticsConfig::default(),
@@ -197,6 +199,29 @@ impl Default for TerrainConfig {
 }
 
 pub const MAX_DROPLETS: u32 = 1_000_000;
+
+/// Deposits of each resource, in the order ore, timber, grain, salt, gems.
+/// Counts are for a 512x512 world and scale with area; spacings and radii
+/// are in cells of a 512-wide map.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ResourceConfig {
+    pub deposits_per_map: [u32; 5],
+    /// Minimum distance between two deposits of the same kind.
+    pub spacing: [f32; 5],
+    /// How far a settlement draws on deposits and farmland.
+    pub catchment_radius: f32,
+}
+
+impl Default for ResourceConfig {
+    fn default() -> Self {
+        Self {
+            deposits_per_map: [30, 50, 50, 15, 8],
+            spacing: [12.0, 14.0, 14.0, 16.0, 20.0],
+            catchment_radius: 8.0,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
