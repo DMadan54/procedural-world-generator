@@ -87,6 +87,12 @@ pub(super) struct Context {
     pub(super) hardship_cause: std::collections::BTreeMap<u32, u32>,
     /// Per settlement: the year of its latest famine.
     pub(super) last_famine: std::collections::BTreeMap<u32, u32>,
+    /// Per year-0 settlement: a port (plague starts at ports and hubs).
+    pub(super) ports: Vec<bool>,
+    /// Per afflicted settlement: the share recovered in its current outbreak.
+    pub(super) recovered: std::collections::BTreeMap<u32, f32>,
+    /// Outbreaks so far.
+    pub(super) outbreaks: u32,
 }
 
 /// Everything history is simulated from.
@@ -196,6 +202,13 @@ impl HistoryJob {
             drought_sites: super::disasters::drought_sites(biomes),
             hardship_cause: Default::default(),
             last_famine: Default::default(),
+            ports: settlements
+                .settlements
+                .iter()
+                .map(|s| s.flags.port)
+                .collect(),
+            recovered: Default::default(),
+            outbreaks: 0,
         };
         let initial = HistoryState::initial(realms, settlements, landmarks);
         let mut job = Self {
@@ -313,8 +326,13 @@ impl HistoryJob {
     /// stop carrying goods, new hubs and new shortages are logged.
     fn trade_season(&mut self, year: u32) {
         let n = self.ctx.roads.settlement_count;
+        // Towns where the plague has taken hold close their gates to trade;
+        // early on nobody has noticed yet, which is how it travels.
         let alive: Vec<u32> = (0..n as u32)
-            .filter(|&s| self.state.settlements[s as usize].alive)
+            .filter(|&s| {
+                let st = &self.state.settlements[s as usize];
+                st.alive && st.plague < 0.1
+            })
             .collect();
         let mut balance: Vec<Goods> = vec![[0.0; Resource::COUNT]; n];
         for &s in &alive {

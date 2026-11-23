@@ -9,6 +9,7 @@
 
 mod disasters;
 mod event;
+mod plague;
 mod sim;
 mod state;
 mod war;

@@ -106,6 +106,10 @@ pub struct SettlementState {
     pub hub: bool,
     /// Ash, drought or ruin: no growth and poor harvests before this year.
     pub hardship_until: u32,
+    /// Share of the people sick with plague (0 when healthy).
+    pub plague: f32,
+    /// The latest outbreak to reach it (a town is struck once per outbreak).
+    pub outbreak: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -216,6 +220,8 @@ impl HistoryState {
                     trade: 0.0,
                     hub: false,
                     hardship_until: 0,
+                    plague: 0.0,
+                    outbreak: None,
                 })
                 .collect(),
             trade: Vec::new(),
@@ -322,6 +328,8 @@ impl HistoryState {
                     trade: 0.0,
                     hub: false,
                     hardship_until: 0,
+                    plague: 0.0,
+                    outbreak: None,
                 });
             }
             EventKind::SettlementGrew {
@@ -581,6 +589,29 @@ impl HistoryState {
                 });
             }
             EventKind::Earthquake { .. } | EventKind::Drought { .. } => {}
+            EventKind::PlagueOutbreak {
+                outbreak,
+                settlement,
+                ..
+            }
+            | EventKind::PlagueSpread {
+                outbreak,
+                to: settlement,
+                ..
+            } => {
+                let s = &mut self.settlements[*settlement as usize];
+                s.plague = 0.02;
+                s.outbreak = Some(*outbreak);
+            }
+            EventKind::PlagueToll {
+                settlement,
+                deaths,
+                infected,
+            } => {
+                let s = &mut self.settlements[*settlement as usize];
+                s.population = s.population.saturating_sub(*deaths);
+                s.plague = *infected;
+            }
             EventKind::Famine {
                 settlement, deaths, ..
             } => {

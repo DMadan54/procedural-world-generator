@@ -542,6 +542,40 @@ pub fn describe(event: &Event, names: &HistoryState) -> String {
                 .map_or("the wilds", |s| s.name.as_str());
             format!("The rains fail around {near}")
         }
+        EventKind::PlagueOutbreak {
+            settlement, name, ..
+        } => {
+            let mut chars = name.chars();
+            let name: String = chars
+                .next()
+                .map_or_else(String::new, |c| c.to_uppercase().chain(chars).collect());
+            format!(
+                "{name} breaks out in {}",
+                settlement_name(names, *settlement)
+            )
+        }
+        EventKind::PlagueSpread { from, to, .. } => format!(
+            "Plague spreads from {} to {} along the trade road",
+            settlement_name(names, *from),
+            settlement_name(names, *to)
+        ),
+        EventKind::PlagueToll {
+            settlement,
+            deaths,
+            infected,
+        } => {
+            if *infected == 0.0 {
+                format!(
+                    "The plague passes from {} ({deaths} more dead)",
+                    settlement_name(names, *settlement)
+                )
+            } else {
+                format!(
+                    "Plague in {}: {deaths} die",
+                    settlement_name(names, *settlement)
+                )
+            }
+        }
         EventKind::Famine {
             settlement, deaths, ..
         } => format!(

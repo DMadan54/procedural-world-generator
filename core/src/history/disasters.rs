@@ -83,6 +83,10 @@ impl HistoryJob {
         for _ in 0..occurrences(&self.ctx.disasters.droughts.clone(), rng) {
             self.drought(year, rng);
         }
+        for _ in 0..occurrences(&self.ctx.disasters.plagues.clone(), rng) {
+            self.outbreak(year, rng);
+        }
+        self.plague_year(year, rng);
         self.sieges_ruin_harvests(year);
         self.famines(year, rng);
     }
@@ -128,7 +132,7 @@ impl HistoryJob {
             .collect()
     }
 
-    fn is_capital(&self, settlement: u32) -> Option<u16> {
+    pub(super) fn is_capital(&self, settlement: u32) -> Option<u16> {
         self.state
             .living_realms()
             .find(|(_, r)| r.capital == settlement)
@@ -163,7 +167,7 @@ impl HistoryJob {
     }
 
     /// A ruler dies in the disaster and a new house takes the throne.
-    fn topple(&mut self, year: u32, realm: u16, cause: Cause, rng: &mut ChaCha8Rng) {
+    pub(super) fn topple(&mut self, year: u32, realm: u16, cause: Cause, rng: &mut ChaCha8Rng) {
         let people = self.state.realms[realm as usize].people;
         let ruler = Ruler {
             name: self.next_name(people, NameKind::Person),

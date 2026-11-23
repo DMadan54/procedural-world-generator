@@ -312,6 +312,27 @@ pub enum EventKind {
         deaths: u32,
         cause: Cause,
     },
+    /// A plague breaks out at a port or trade hub. `outbreak` numbers
+    /// outbreaks from 0.
+    PlagueOutbreak {
+        outbreak: u32,
+        settlement: u32,
+        name: String,
+        cause: Cause,
+    },
+    /// The plague travels along a trade route.
+    PlagueSpread {
+        outbreak: u32,
+        from: u32,
+        to: u32,
+    },
+    /// A year of plague in a settlement: `infected` is the share now sick
+    /// (0 when it has passed).
+    PlagueToll {
+        settlement: u32,
+        deaths: u32,
+        infected: f32,
+    },
     /// People leave a settlement for another (fleeing famine, mostly).
     Migration {
         from: u32,
@@ -472,7 +493,13 @@ impl EventKind {
             | EventKind::BlightReachedSettlement { settlement, .. }
             | EventKind::SettlementStruck { settlement, .. }
             | EventKind::Famine { settlement, .. } => vec![*settlement],
-            EventKind::Migration { from, to, .. } => vec![*from, *to],
+            EventKind::Migration { from, to, .. } | EventKind::PlagueSpread { from, to, .. } => {
+                vec![*from, *to]
+            }
+            EventKind::PlagueOutbreak { settlement, .. }
+            | EventKind::PlagueToll { settlement, .. } => {
+                vec![*settlement]
+            }
             EventKind::HardTimes { settlements, .. } => settlements.clone(),
             _ => Vec::new(),
         }
@@ -489,6 +516,7 @@ impl EventKind {
                 | EventKind::TradeRouteClosed { .. }
                 | EventKind::OpinionsShifted { .. }
                 | EventKind::BlightSpread { .. }
+                | EventKind::PlagueToll { .. }
         )
     }
 }
