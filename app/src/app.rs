@@ -69,10 +69,12 @@ enum DebugView {
     /// Landmarks stage: dens, ruins, nexuses, drowned cities, leylines and
     /// the Blight at the slider year.
     Landmarks,
+    /// History stage: disasters and their aftermath at the slider year.
+    Disasters,
 }
 
 impl DebugView {
-    const ALL: [DebugView; 21] = [
+    const ALL: [DebugView; 22] = [
         DebugView::Terrain,
         DebugView::Plates,
         DebugView::TectonicRelief,
@@ -94,6 +96,7 @@ impl DebugView {
         DebugView::Trade,
         DebugView::Diplomacy,
         DebugView::Landmarks,
+        DebugView::Disasters,
     ];
 
     fn label(self) -> &'static str {
@@ -119,6 +122,7 @@ impl DebugView {
             DebugView::Trade => "Trade by year",
             DebugView::Diplomacy => "Diplomacy by year",
             DebugView::Landmarks => "Landmarks and the Blight",
+            DebugView::Disasters => "Disasters by year",
         }
     }
 }
@@ -341,6 +345,7 @@ impl WorldGenApp {
                 render::realms_at(&self.world, state)
             }
             DebugView::Landmarks => render::landmarks_at(&self.world, state),
+            DebugView::Disasters => render::disasters_at(&self.world, state),
             DebugView::Resources | DebugView::Network | DebugView::Trade => {
                 render::wind_background(map, sea)
             }
@@ -669,6 +674,20 @@ impl WorldGenApp {
                     ));
                 }
                 ui.weak("Hover a landmark on any map for its story.");
+            }
+            Some(DebugView::Disasters) => {
+                for (colour, label) in [
+                    (render::VOLCANO_RGB, "Volcano (has erupted)"),
+                    (render::QUAKE_RGB, "Earthquake, last 30 years"),
+                    (render::DROUGHT_RGB, "Drought, last 8 years"),
+                    (render::HARDSHIP_RGB, "Town in hard times"),
+                    (render::PLAGUE_RGB, "Town under plague"),
+                    (render::NEW_RIVER_RGB, "River's new course"),
+                    (render::OLD_RIVER_RGB, "Abandoned riverbed"),
+                    ([0, 0, 0], "Town lost to disaster"),
+                ] {
+                    legend_row(ui, colour, label);
+                }
             }
             Some(DebugView::Diplomacy) => {
                 for (colour, label) in [
@@ -1609,6 +1628,7 @@ impl eframe::App for WorldGenApp {
                 | DebugView::Trade
                 | DebugView::Diplomacy
                 | DebugView::Landmarks
+                | DebugView::Disasters
         );
         if year_changed && (self.style.is_some() || yearly) {
             self.texture_dirty = true;

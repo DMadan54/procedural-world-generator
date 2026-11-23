@@ -8,6 +8,7 @@ use worldgen_core::settlements::NO_SETTLEMENT;
 use worldgen_core::{Biome, World};
 
 use super::borders;
+use super::calamity;
 use super::canvas::{Canvas, Colour};
 use super::lettering;
 use super::network;
@@ -208,16 +209,21 @@ impl MapStyle for AntiqueStyle {
             }
         }
 
-        // Rivers: smoothed, tapering with discharge.
+        // Rivers: smoothed, tapering with discharge. Rivers that change course
+        // during history are drawn here only down to where they break out;
+        // the rest depends on the year (see `calamity`).
         let threshold = world.config.hydrology.river_threshold.max(1e-3);
-        for segment in &hy.segments {
-            let widths: Vec<f32> = segment
-                .discharge
+        let moved = calamity::avulsions(world);
+        for (i, segment) in hy.segments.iter().enumerate() {
+            let end = moved
                 .iter()
-                .map(|q| (0.3 + 0.3 * (q / threshold).sqrt()).clamp(0.4, 1.7) * s)
+                .find(|m| m.0 as usize == i)
+                .map_or(segment.points.len(), |m| m.1 as usize + 1);
+            let widths: Vec<f32> = segment.discharge[..end]
+                .iter()
+                .map(|&q| calamity::river_width(q, threshold, s))
                 .collect();
-            let points: Vec<[f32; 2]> = segment
-                .points
+            let points: Vec<[f32; 2]> = segment.points[..end]
                 .iter()
                 .map(|p| [p[0] * s, p[1] * s])
                 .collect();
@@ -249,6 +255,7 @@ impl MapStyle for AntiqueStyle {
     fn render_year(&self, world: &World, state: &HistoryState, landscape: &Canvas) -> Canvas {
         let s = self.scale.max(1) as f32;
         let mut canvas = landscape.clone();
+        calamity::draw_moving_rivers(&mut canvas, world, state, s);
         borders::wash(&mut canvas, state, s);
         wonders::draw_blight(&mut canvas, world, state, s);
         borders::frontiers(&mut canvas, world, state, s);
@@ -256,7 +263,10 @@ impl MapStyle for AntiqueStyle {
         lettering::draw_people_names(&mut canvas, world, state, s);
         lettering::draw_settlements(&mut canvas, state, s);
         lettering::draw_battles(&mut canvas, state, s);
+        calamity::draw_migrations(&mut canvas, state, s);
         wonders::draw_landmarks(&mut canvas, state, s);
+        calamity::draw_volcanoes(&mut canvas, state, s);
+        calamity::draw_plague(&mut canvas, state, s);
         lettering::draw_settlement_labels(&mut canvas, world, state, s);
         frame(&mut canvas, s);
         canvas

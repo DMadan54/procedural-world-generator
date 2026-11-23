@@ -9,6 +9,7 @@
 
 mod antique;
 mod borders;
+mod calamity;
 mod canvas;
 mod lettering;
 mod network;

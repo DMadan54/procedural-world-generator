@@ -202,6 +202,98 @@ pub fn landmarks_at(
     ColorImage::from_rgb([w, h], &flat)
 }
 
+pub const HARDSHIP_RGB: Rgb = [230, 200, 40];
+pub const PLAGUE_RGB: Rgb = [220, 20, 30];
+pub const VOLCANO_RGB: Rgb = [255, 120, 0];
+pub const QUAKE_RGB: Rgb = [230, 60, 230];
+pub const DROUGHT_RGB: Rgb = [170, 110, 50];
+pub const NEW_RIVER_RGB: Rgb = [40, 220, 255];
+pub const OLD_RIVER_RGB: Rgb = [40, 60, 90];
+
+/// Disasters at a year: towns in hard times or under plague, every
+/// eruption so far, earthquakes and droughts of the last decades as rings,
+/// moved rivers (new course bright, old bed dark) and fallen towns.
+pub fn disasters_at(
+    world: &worldgen_core::World,
+    state: &worldgen_core::history::HistoryState,
+) -> ColorImage {
+    use worldgen_core::history::EventKind;
+    let (w, h) = (state.width, state.height);
+    let sea = world.config.terrain.sea_level;
+    let mut rgb: Vec<Rgb> = (0..w * h)
+        .map(|i| {
+            let c = hypsometric_colour(world.terrain.data[i], sea);
+            c.map(|v| (v as f32 * 0.4 + 70.0) as u8)
+        })
+        .collect();
+    let mut put = |x: i64, y: i64, c: Rgb| {
+        if x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h {
+            rgb[y as usize * w + x as usize] = c;
+        }
+    };
+    let xy = |cell: u32| ((cell as usize % w) as i64, (cell as usize / w) as i64);
+    let ring = |put: &mut dyn FnMut(i64, i64, Rgb), cell: u32, r: f32, c: Rgb| {
+        let (x, y) = xy(cell);
+        for k in 0..96 {
+            let a = k as f32 / 96.0 * std::f32::consts::TAU;
+            put(x + (r * a.cos()) as i64, y + (r * a.sin()) as i64, c);
+        }
+    };
+    for e in world
+        .history
+        .events
+        .iter()
+        .take_while(|e| e.year <= state.year)
+    {
+        let recent = state.year - e.year <= 30;
+        match &e.kind {
+            EventKind::Earthquake {
+                cell, magnitude, ..
+            } if recent => {
+                let r = (magnitude - 4.5) * 18.0 * w as f32 / 512.0;
+                ring(&mut put, *cell, r, QUAKE_RGB);
+            }
+            EventKind::Drought { cell, radius, .. } if state.year - e.year <= 8 => {
+                ring(&mut put, *cell, *radius, DROUGHT_RGB);
+            }
+            _ => {}
+        }
+    }
+    for r in &state.rivers {
+        for p in &r.old_course {
+            put(p[0] as i64, p[1] as i64, OLD_RIVER_RGB);
+        }
+        for p in &r.new_course {
+            put(p[0] as i64, p[1] as i64, NEW_RIVER_RGB);
+        }
+    }
+    let mut square = |cell: u32, r: i64, c: Rgb| {
+        let (x, y) = xy(cell);
+        for dy in -r..=r {
+            for dx in -r..=r {
+                put(x + dx, y + dy, c);
+            }
+        }
+    };
+    for l in &state.landmarks {
+        if l.kind == worldgen_core::landmarks::LandmarkKind::FallenTown {
+            square(l.cell, 1, [0, 0, 0]);
+        }
+    }
+    for st in state.settlements.iter().filter(|s| s.alive) {
+        if st.plague > 0.0 {
+            square(st.cell, 2, PLAGUE_RGB);
+        } else if state.year < st.hardship_until {
+            square(st.cell, 1, HARDSHIP_RGB);
+        }
+    }
+    for e in &state.eruptions {
+        square(e.cell, 2, VOLCANO_RGB);
+    }
+    let flat: Vec<u8> = rgb.into_iter().flatten().collect();
+    ColorImage::from_rgb([w, h], &flat)
+}
+
 /// Realms in their wash colours (stronger than on the map), wilderness grey.
 pub fn realms(world: &worldgen_core::World) -> ColorImage {
     let r = &world.realms;
