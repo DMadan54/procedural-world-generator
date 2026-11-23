@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::event::{Event, EventKind, Flow, Grievance, Ruler};
+use crate::landmarks::{LandmarkKind, Landmarks};
 use crate::realms::{Realms, NO_REALM};
 use crate::settlements::{Rank, Settlements};
 
@@ -105,6 +106,29 @@ pub struct SettlementState {
     pub hub: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Dragon {
+    Asleep,
+    Awake,
+    Slain,
+}
+
+/// A landmark as it stands in a given year.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LandmarkState {
+    pub name: String,
+    pub kind: LandmarkKind,
+    pub cell: u32,
+    /// Dens only.
+    pub dragon: Option<Dragon>,
+    /// Ruins: the realm that found what was inside.
+    pub discovered_by: Option<u16>,
+    /// Nexuses: the realm that holds it.
+    pub holder: Option<u16>,
+    /// The story hook (for landmarks made during history, how they came to be).
+    pub hook: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HistoryState {
     /// Events up to and including this year have been applied.
@@ -126,11 +150,15 @@ pub struct HistoryState {
     pub relations: Vec<Relation>,
     pub wars: Vec<WarState>,
     pub battles: Vec<BattleRecord>,
+    /// Year-0 landmarks first, then ruins left by the Blight.
+    pub landmarks: Vec<LandmarkState>,
+    /// Per cell: under the Blight.
+    pub blight: Vec<bool>,
 }
 
 impl HistoryState {
     /// The state before any event: the realms and settlements stages.
-    pub fn initial(realms: &Realms, settlements: &Settlements) -> Self {
+    pub fn initial(realms: &Realms, settlements: &Settlements, landmarks: &Landmarks) -> Self {
         Self {
             year: 0,
             applied: 0,
@@ -173,6 +201,20 @@ impl HistoryState {
             relations: Vec::new(),
             wars: Vec::new(),
             battles: Vec::new(),
+            landmarks: landmarks
+                .landmarks
+                .iter()
+                .map(|l| LandmarkState {
+                    name: l.name.clone(),
+                    kind: l.kind,
+                    cell: l.cell,
+                    dragon: (l.kind == LandmarkKind::DragonDen).then_some(Dragon::Asleep),
+                    discovered_by: None,
+                    holder: None,
+                    hook: l.hook.clone(),
+                })
+                .collect(),
+            blight: vec![false; realms.width * realms.height],
         }
     }
 
@@ -469,6 +511,86 @@ impl HistoryState {
                     }
                 }
             }
+            EventKind::DragonAwakened { landmark, .. } => {
+                self.landmarks[*landmark as usize].dragon = Some(Dragon::Awake);
+            }
+            EventKind::DragonSlept { landmark } => {
+                self.landmarks[*landmark as usize].dragon = Some(Dragon::Asleep);
+            }
+            EventKind::DragonRaid {
+                settlement, deaths, ..
+            } => {
+                let s = &mut self.settlements[*settlement as usize];
+                s.population = s.population.saturating_sub(*deaths);
+            }
+            EventKind::DragonSlain {
+                landmark,
+                realm,
+                hoard,
+                ..
+            } => {
+                self.landmarks[*landmark as usize].dragon = Some(Dragon::Slain);
+                self.realms[*realm as usize].wealth += hoard;
+            }
+            EventKind::RuinDiscovered {
+                landmark,
+                realm,
+                treasure,
+            } => {
+                self.landmarks[*landmark as usize].discovered_by = Some(*realm);
+                self.realms[*realm as usize].wealth += treasure;
+            }
+            EventKind::NexusClaimed {
+                landmark,
+                realm,
+                boon,
+            } => {
+                self.landmarks[*landmark as usize].holder = Some(*realm);
+                self.realms[*realm as usize].wealth += boon;
+            }
+            EventKind::BlightSpread { cells, .. } => {
+                for &c in cells {
+                    self.blight[c as usize] = true;
+                }
+            }
+            EventKind::BlightPurged {
+                cells, realm, cost, ..
+            } => {
+                for &c in cells {
+                    self.blight[c as usize] = false;
+                }
+                self.realms[*realm as usize].wealth -= cost;
+            }
+            EventKind::BlightReachedSettlement {
+                settlement,
+                deaths,
+                abandoned,
+                ruin,
+            } => {
+                let s = &mut self.settlements[*settlement as usize];
+                s.population = s.population.saturating_sub(*deaths);
+                if *abandoned {
+                    s.alive = false;
+                    let (name, cell) = (s.name.clone(), s.cell);
+                    self.landmarks.push(LandmarkState {
+                        name: ruin.clone(),
+                        kind: LandmarkKind::BlightedRuin,
+                        cell,
+                        dragon: None,
+                        discovered_by: None,
+                        holder: None,
+                        hook: format!(
+                            "{ruin}: once the town of {name}, emptied by the Blight in the year {}.",
+                            event.year
+                        ),
+                    });
+                }
+            }
         }
+    }
+
+    /// Cells under the Blight.
+    pub fn blight_extent(&self) -> usize {
+        self.blight.iter().filter(|&&b| b).count()
     }
 }

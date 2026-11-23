@@ -10,6 +10,7 @@
 //! appear.
 
 use rand_chacha::rand_core::RngCore;
+use serde::{Deserialize, Serialize};
 
 use crate::climate::elevation_m;
 use crate::config::{MagicLevel, WorldConfig};
@@ -19,15 +20,17 @@ use crate::hydrology::Hydrology;
 use crate::peoples::{Peoples, NO_PEOPLE};
 use crate::realms::{Realms, NO_REALM};
 use crate::resources::{Resource, Resources};
-use crate::rng::{entity_rng, stage, stage_rng};
+use crate::rng::{entity_rng, stage, stage_rng, unit_f32};
 use crate::settlements::Settlements;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum LandmarkKind {
     DragonDen,
     ElderRuin,
     LeylineNexus,
     DrownedCity,
+    /// A town the Blight emptied (made during history, never at year 0).
+    BlightedRuin,
 }
 
 impl LandmarkKind {
@@ -41,6 +44,7 @@ impl LandmarkKind {
             LandmarkKind::ElderRuin => "elder ruin",
             LandmarkKind::LeylineNexus => "leyline nexus",
             LandmarkKind::DrownedCity => "drowned city",
+            LandmarkKind::BlightedRuin => "blighted ruin",
         }
     }
 }
@@ -86,12 +90,8 @@ pub struct LandmarkInputs<'a> {
     pub realms: &'a Realms,
 }
 
-/// A uniform draw in `0.0..1.0` from 24 random bits (exact in `f32`).
-fn unit_f32(rng: &mut impl RngCore) -> f32 {
-    (rng.next_u32() >> 8) as f32 / (1u32 << 24) as f32
-}
-
-fn magic_scale(level: MagicLevel) -> f32 {
+/// How strongly magic shows in the world: 0 (none) to 2 (saturated).
+pub fn magic_scale(level: MagicLevel) -> f32 {
     match level {
         MagicLevel::None => 0.0,
         MagicLevel::Rare => 0.5,
@@ -131,7 +131,7 @@ pub fn generate_landmarks(input: &LandmarkInputs) -> Landmarks {
     let sea = input.config.terrain.sea_level;
 
     // Dragon dens: high, remote peaks, better near gems and ore.
-    let count = (p.dragon_dens as f32 * area * magic).round() as usize;
+    let count = (p.dragon_dens as f32 * area * magic).ceil() as usize;
     let remote = 25.0 * reference;
     let dens = pick(w, h, count, 40.0 * reference, |i| {
         let height = input.terrain.data[i];
@@ -147,7 +147,7 @@ pub fn generate_landmarks(input: &LandmarkInputs) -> Landmarks {
     }
 
     // Elder ruins: good land nobody has settled.
-    let count = (p.elder_ruins as f32 * area).round() as usize;
+    let count = (p.elder_ruins as f32 * area).ceil() as usize;
     let empty = 20.0 * reference;
     let jitter: Vec<f32> = (0..w * h).map(|_| unit_f32(rng)).collect();
     let ruins = pick(w, h, count, 40.0 * reference, |i| {
@@ -162,7 +162,7 @@ pub fn generate_landmarks(input: &LandmarkInputs) -> Landmarks {
     }
 
     // Leylines bent through shared focus points; three or more meet at each.
-    let foci = (p.nexuses as f32 * area * magic).round() as usize;
+    let foci = (p.nexuses as f32 * area * magic).ceil() as usize;
     let mut focus_cells = Vec::new();
     for _ in 0..foci * 40 {
         if focus_cells.len() >= foci {
@@ -190,7 +190,7 @@ pub fn generate_landmarks(input: &LandmarkInputs) -> Landmarks {
     }
 
     // Drowned cities: just below the waves, close to the coast.
-    let count = (p.drowned_cities as f32 * area).round() as usize;
+    let count = (p.drowned_cities as f32 * area).ceil() as usize;
     let drowned = pick(w, h, count, 50.0 * reference, |i| {
         let depth = sea - input.terrain.data[i];
         if depth <= 0.0 || depth > 0.02 || !ctx.land_within(i, 3) {
@@ -440,7 +440,8 @@ impl<'a> Describer<'a> {
                 };
                 (name, hook)
             }
-            LandmarkKind::ElderRuin => {
+            // Blighted ruins only appear during history, with their own hook.
+            LandmarkKind::ElderRuin | LandmarkKind::BlightedRuin => {
                 let name = match v {
                     0 => format!("the Ruins of {base}"),
                     1 => format!("the Broken Halls of {base}"),

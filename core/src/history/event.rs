@@ -56,6 +56,10 @@ pub enum Cause {
     Absorption,
     /// Ties of blood between ruling houses.
     Alliance,
+    /// Settlers, miners or herders came too close to something sleeping.
+    Disturbed,
+    /// Someone delved where they should not have.
+    Delving,
     /// The direct consequence of an earlier event in the log.
     Event(u32),
 }
@@ -233,6 +237,60 @@ pub enum EventKind {
         by: u16,
         cause: Cause,
     },
+    /// `landmark` indexes `HistoryState::landmarks` (a dragon den).
+    DragonAwakened {
+        landmark: u32,
+        cause: Cause,
+    },
+    DragonRaid {
+        landmark: u32,
+        settlement: u32,
+        deaths: u32,
+    },
+    /// The dragon goes back to sleep on its hoard.
+    DragonSlept {
+        landmark: u32,
+    },
+    /// A hero of `realm` kills the dragon and carries off its hoard.
+    DragonSlain {
+        landmark: u32,
+        realm: u16,
+        hero: String,
+        hoard: f32,
+        cause: Cause,
+    },
+    /// A realm finds an elder ruin on its land and what was left in it.
+    RuinDiscovered {
+        landmark: u32,
+        realm: u16,
+        treasure: f32,
+    },
+    /// A realm takes a leyline nexus and the power that pools there.
+    NexusClaimed {
+        landmark: u32,
+        realm: u16,
+        boon: f32,
+    },
+    /// The Blight takes these cells.
+    BlightSpread {
+        cells: Vec<u32>,
+        cause: Cause,
+    },
+    /// A realm burns the Blight out of these cells.
+    BlightPurged {
+        cells: Vec<u32>,
+        realm: u16,
+        hero: String,
+        cost: f32,
+    },
+    /// The Blight reaches a settlement. If `abandoned`, it becomes a ruin
+    /// (a new landmark named `ruin`).
+    BlightReachedSettlement {
+        settlement: u32,
+        deaths: u32,
+        abandoned: bool,
+        ruin: String,
+    },
 }
 
 /// What a rivalry or war is about. Each names the place, route or house in
@@ -318,10 +376,28 @@ impl EventKind {
             }
             EventKind::WarJoined { realm, .. } => vec![*realm],
             EventKind::RealmAnnexed { realm, by, .. } => vec![*realm, *by],
+            EventKind::DragonSlain { realm, .. }
+            | EventKind::RuinDiscovered { realm, .. }
+            | EventKind::NexusClaimed { realm, .. }
+            | EventKind::BlightPurged { realm, .. } => vec![*realm],
             EventKind::RealmSplit {
                 realm, new_realm, ..
             } => vec![*realm, *new_realm],
             _ => Vec::new(),
+        }
+    }
+
+    /// The landmark this event concerns, if any (index into
+    /// `HistoryState::landmarks`).
+    pub fn landmark(&self) -> Option<u32> {
+        match self {
+            EventKind::DragonAwakened { landmark, .. }
+            | EventKind::DragonRaid { landmark, .. }
+            | EventKind::DragonSlept { landmark }
+            | EventKind::DragonSlain { landmark, .. }
+            | EventKind::RuinDiscovered { landmark, .. }
+            | EventKind::NexusClaimed { landmark, .. } => Some(*landmark),
+            _ => None,
         }
     }
 
@@ -337,7 +413,9 @@ impl EventKind {
             | EventKind::TradeRouteClosed { from, to, .. } => vec![*from, *to],
             EventKind::TradeHub { settlement, .. }
             | EventKind::Shortage { settlement, .. }
-            | EventKind::Siege { settlement, .. } => vec![*settlement],
+            | EventKind::Siege { settlement, .. }
+            | EventKind::DragonRaid { settlement, .. }
+            | EventKind::BlightReachedSettlement { settlement, .. } => vec![*settlement],
             _ => Vec::new(),
         }
     }
@@ -352,6 +430,7 @@ impl EventKind {
                 | EventKind::TradeRouteOpened { .. }
                 | EventKind::TradeRouteClosed { .. }
                 | EventKind::OpinionsShifted { .. }
+                | EventKind::BlightSpread { .. }
         )
     }
 }

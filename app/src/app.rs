@@ -225,6 +225,7 @@ impl WorldGenApp {
                 self.state = Some(HistoryState::initial(
                     &self.world.realms,
                     &self.world.settlements,
+                    &self.world.landmarks,
                 ));
             }
             return;

@@ -16,6 +16,7 @@ use crate::biome::Biomes;
 use crate::config::TradeConfig;
 use crate::config::WorldConfig;
 use crate::habitability::Habitability;
+use crate::landmarks::Landmarks;
 use crate::names::Language;
 use crate::peoples::Peoples;
 use crate::realms::{Government, Realms, NO_REALM, PALETTE_SIZE};
@@ -67,6 +68,13 @@ pub(super) struct Context {
     pub(super) pass: Vec<bool>,
     /// Per war: cells that changed hands in it so far.
     pub(super) war_cells: Vec<u32>,
+    /// How strong magic is (0 without it): scales dragons and the Blight.
+    pub(super) magic: f32,
+    /// Index of the landmark the Blight starts from, and the year it starts.
+    pub(super) blight_origin: Option<u32>,
+    pub(super) blight_start: u32,
+    /// Land cells, for capping the Blight's reach.
+    pub(super) land_cells: u32,
 }
 
 /// Everything history is simulated from.
@@ -79,6 +87,7 @@ pub struct HistoryInputs<'a> {
     pub resources: &'a Resources,
     pub roads: &'a Roads,
     pub realms: &'a Realms,
+    pub landmarks: &'a Landmarks,
     pub travel_cost: &'a [f32],
 }
 
@@ -111,6 +120,7 @@ impl HistoryJob {
             resources,
             roads,
             realms,
+            landmarks,
             travel_cost,
         } = *input;
         let (w, h) = (realms.width, realms.height);
@@ -159,8 +169,15 @@ impl HistoryJob {
                 .map(|s| s.flags.mountain_pass)
                 .collect(),
             war_cells: Vec::new(),
+            magic: crate::landmarks::magic_scale(config.magic.level),
+            blight_origin: landmarks.blight_origin,
+            blight_start: {
+                let rng = &mut entity_rng(config.seed, stage::HISTORY_LANDMARKS, 0);
+                150 + rng.next_u32() % 300
+            },
+            land_cells: biomes.biome.iter().filter(|b| !b.is_water()).count() as u32,
         };
-        let initial = HistoryState::initial(realms, settlements);
+        let initial = HistoryState::initial(realms, settlements, landmarks);
         let mut job = Self {
             years: config.history.years,
             interval: config.history.snapshot_interval.max(1),
@@ -264,6 +281,7 @@ impl HistoryJob {
             self.trade_season(year);
         }
         self.settlement_life(year, rng);
+        self.landmark_life(year);
         self.foundings(year, rng);
     }
 
@@ -725,6 +743,7 @@ impl HistoryJob {
             let spacing2 = self.ctx.spacing * self.ctx.spacing;
             let site = self.ctx.candidates.iter().copied().find(|&c| {
                 self.state.owner[c as usize] == id
+                    && !self.state.blight[c as usize]
                     && self.state.settlements.iter().filter(|s| s.alive).all(|s| {
                         let (a, b) = (s.cell as usize, c as usize);
                         let (dx, dy) = (

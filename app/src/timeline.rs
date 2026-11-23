@@ -202,6 +202,13 @@ fn settlement_name(names: &HistoryState, settlement: u32) -> String {
         .map_or_else(|| format!("settlement {settlement}"), |s| s.name.clone())
 }
 
+fn landmark_name(names: &HistoryState, landmark: u32) -> String {
+    names
+        .landmarks
+        .get(landmark as usize)
+        .map_or_else(|| format!("landmark {landmark}"), |l| l.name.clone())
+}
+
 fn grievance_text(grievance: &worldgen_core::history::Grievance, names: &HistoryState) -> String {
     use worldgen_core::history::Grievance;
     match grievance {
@@ -451,6 +458,73 @@ pub fn describe(event: &Event, names: &HistoryState) -> String {
                 "{} is annexed by {}",
                 realm_name(names, *realm),
                 realm_name(names, *by)
+            )
+        }
+        EventKind::DragonAwakened { landmark, .. } => format!(
+            "The dragon of {} wakes, stirred by the towns below",
+            landmark_name(names, *landmark)
+        ),
+        EventKind::DragonRaid {
+            landmark,
+            settlement,
+            deaths,
+        } => format!(
+            "The dragon of {} burns {}; {deaths} die",
+            landmark_name(names, *landmark),
+            settlement_name(names, *settlement)
+        ),
+        EventKind::DragonSlept { landmark } => format!(
+            "The dragon of {} sleeps again on its hoard",
+            landmark_name(names, *landmark)
+        ),
+        EventKind::DragonSlain {
+            landmark,
+            realm,
+            hero,
+            ..
+        } => format!(
+            "{hero} of {} slays the dragon of {} and carries off its hoard",
+            realm_name(names, *realm),
+            landmark_name(names, *landmark)
+        ),
+        EventKind::RuinDiscovered {
+            landmark, realm, ..
+        } => format!(
+            "{} uncovers the treasures of {}",
+            realm_name(names, *realm),
+            landmark_name(names, *landmark)
+        ),
+        EventKind::NexusClaimed {
+            landmark, realm, ..
+        } => format!(
+            "{} takes {} and the power pooled there",
+            realm_name(names, *realm),
+            landmark_name(names, *landmark)
+        ),
+        EventKind::BlightSpread { cells, .. } => {
+            format!("The Blight spreads over {} more leagues", cells.len())
+        }
+        EventKind::BlightPurged {
+            cells, realm, hero, ..
+        } => format!(
+            "{hero} of {} burns the Blight from {} leagues",
+            realm_name(names, *realm),
+            cells.len()
+        ),
+        EventKind::BlightReachedSettlement {
+            settlement,
+            deaths,
+            abandoned,
+            ..
+        } => {
+            let fate = if *abandoned {
+                "the survivors flee and leave it to ruin"
+            } else {
+                "it holds on"
+            };
+            format!(
+                "The Blight reaches {}: {deaths} die and {fate}",
+                settlement_name(names, *settlement)
             )
         }
     }

@@ -169,6 +169,7 @@ impl World {
             resources: &resources,
             roads: &roads,
             realms: &realms,
+            landmarks: &landmarks,
             travel_cost: &travel_cost,
         })
         .finish();
@@ -430,6 +431,7 @@ impl World {
                 resources: &self.resources,
                 roads: &self.roads,
                 realms: &self.realms,
+                landmarks: &self.landmarks,
                 travel_cost: &self.travel_cost,
             }));
             self.pending.history_restart = false;
