@@ -1442,7 +1442,22 @@ mod tests {
         }
         let expected =
             std::fs::read_to_string(path).expect("snapshot missing: run with UPDATE_SNAPSHOTS=1");
-        assert_eq!(text.replace("\r\n", "\n"), expected.replace("\r\n", "\n"));
+        let (got, want) = (text.replace("\r\n", "\n"), expected.replace("\r\n", "\n"));
+        if got != want {
+            // Name the first line that differs (as a CI annotation too).
+            let line = got
+                .lines()
+                .zip(want.lines())
+                .position(|(g, w)| g != w)
+                .unwrap_or(0);
+            println!(
+                "::error::chronicle differs at line {}: expected {:?}, got {:?}",
+                line + 1,
+                want.lines().nth(line).unwrap_or(""),
+                got.lines().nth(line).unwrap_or("")
+            );
+            panic!("chronicle snapshot differs at line {}", line + 1);
+        }
     }
 
     #[test]
