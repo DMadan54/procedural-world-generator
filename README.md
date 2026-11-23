@@ -34,6 +34,10 @@ browser.
 - **History with a time slider.** Scrub or play through the centuries and
   watch realms rise, split and fall; an event feed lists what happened and
   why, and the year shows in an antique cartouche.
+- **Export.** Save the map as it stands at any year as a PNG (1×, 2× or 4×,
+  with a title cartouche, compass rose and scale bar), or the whole world as
+  JSON: peoples, towns, realms, landmarks and the complete event log, ready
+  to mine for stories (format in [docs/export-format.md](docs/export-format.md)).
 - **Debug views for every stage.** Inspect plates, relief, noise, erosion,
   temperature, rainfall, winds, drainage and biomes from the View menu.
 

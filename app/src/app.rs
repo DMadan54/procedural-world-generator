@@ -136,6 +136,11 @@ pub struct WorldGenApp {
     setup: SetupPanel,
     /// A message for the user (a bad share link, a copied link).
     notice: Option<String>,
+    /// Export settings: PNG scale (canvas pixels per cell), decorations,
+    /// and whether the JSON carries per-cell grids.
+    export_scale: usize,
+    export_decorations: bool,
+    export_grids: bool,
     /// The config last written to the browser address bar.
     linked_config: Option<WorldConfig>,
     /// Finished-map styles; `style` picks one, or `None` for a debug view.
@@ -197,6 +202,9 @@ impl WorldGenApp {
             names: None,
             era: String::new(),
             selected_realm: None,
+            export_scale: 2,
+            export_decorations: true,
+            export_grids: false,
         }
     }
 
@@ -303,6 +311,75 @@ impl WorldGenApp {
         }
     }
 
+    fn export_controls(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Scale");
+            for scale in [1, 2, 4] {
+                ui.radio_value(&mut self.export_scale, scale, format!("{scale}×"));
+            }
+        });
+        ui.checkbox(
+            &mut self.export_decorations,
+            "Cartouche, compass, scale bar",
+        );
+        if ui.button("Export PNG…").clicked() {
+            self.notice = Some(match self.export_png() {
+                Ok(true) => "Map saved.".into(),
+                Ok(false) => "Export cancelled.".into(),
+                Err(e) => e,
+            });
+        }
+        ui.add_space(4.0);
+        ui.checkbox(&mut self.export_grids, "Include per-cell grids");
+        if ui.button("Export JSON…").clicked() {
+            let json =
+                worldgen_core::export::WorldExport::new(&self.world, self.export_grids).to_json();
+            let name = format!("world-{}.json", self.world.config.seed);
+            self.notice = Some(
+                match crate::export::save(&name, "JSON", "json", json.as_bytes()) {
+                    Ok(true) => "World saved.".into(),
+                    Ok(false) => "Export cancelled.".into(),
+                    Err(e) => e,
+                },
+            );
+        }
+    }
+
+    /// Exactly what the map shows (style or debug view, slider year) at the
+    /// chosen scale, with decorations on styled maps if asked for.
+    fn export_png(&mut self) -> Result<bool, String> {
+        self.ensure_state();
+        let year = self.state.as_ref().map_or(0, |s| s.year);
+        let scale = self.export_scale.max(1);
+        let (w, h, rgb) = match self.style.and_then(|i| self.styles.get(i)) {
+            Some(style) => {
+                let state = self.state.as_ref().expect("ensure_state fills it");
+                let mut canvas = style.scaled(scale).render(&self.world, state);
+                if self.export_decorations {
+                    if self.era.is_empty() {
+                        self.era = era_name(&self.world);
+                    }
+                    let title = world_name(&self.world);
+                    let subtitle = format!("in the year {year} of the Age of {}", self.era);
+                    crate::style::decorate(
+                        &mut canvas,
+                        &crate::style::Decorations {
+                            title: &title,
+                            subtitle: &subtitle,
+                            leagues_per_cell: 512.0 / self.world.config.width.max(1) as f32,
+                            cell_px: scale as f32,
+                        },
+                    );
+                }
+                (canvas.width, canvas.height, canvas.to_rgb8())
+            }
+            None => crate::export::upscale(&self.render_view(), scale),
+        };
+        let bytes = crate::export::png(w, h, &rgb)?;
+        let name = format!("world-{}-year-{year}.png", self.world.config.seed);
+        crate::export::save(&name, "PNG image", "png", &bytes)
+    }
+
     fn render_view(&mut self) -> ColorImage {
         self.ensure_state();
         let state = self.state.as_ref().expect("ensure_state fills it");
@@ -374,6 +451,9 @@ impl WorldGenApp {
                 self.notice = Some("Link copied to the clipboard.".into());
             }
         });
+        egui::CollapsingHeader::new("Export")
+            .default_open(false)
+            .show(ui, |ui| self.export_controls(ui));
         if let Some(notice) = &self.notice {
             ui.weak(notice);
         }
@@ -1551,6 +1631,17 @@ fn link_colour(kind: worldgen_core::roads::LinkKind) -> Rgb {
 
 /// The name of the age years are counted in: a word from the language of
 /// the people with the largest homeland.
+/// The world's name, in the tongue of its largest people.
+fn world_name(world: &World) -> String {
+    world
+        .peoples
+        .peoples
+        .iter()
+        .max_by(|a, b| a.cells.cmp(&b.cells).then(b.id.cmp(&a.id)))
+        .map(|p| p.language.place_name(800_000))
+        .unwrap_or_else(|| "The Known World".to_owned())
+}
+
 fn era_name(world: &World) -> String {
     world
         .peoples

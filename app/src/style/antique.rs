@@ -101,6 +101,12 @@ impl MapStyle for AntiqueStyle {
         "Antique map"
     }
 
+    fn scaled(&self, scale: usize) -> Box<dyn MapStyle> {
+        Box::new(AntiqueStyle {
+            scale: scale.max(1),
+        })
+    }
+
     fn render_landscape(&self, world: &World) -> Canvas {
         let scale = self.scale.max(1);
         let s = scale as f32;

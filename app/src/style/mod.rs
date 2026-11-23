@@ -11,6 +11,7 @@ mod antique;
 mod borders;
 mod calamity;
 mod canvas;
+mod decor;
 mod lettering;
 mod network;
 mod text;
@@ -20,6 +21,7 @@ mod wonders;
 pub use antique::AntiqueStyle;
 pub use borders::realm_colour;
 pub use canvas::Canvas;
+pub use decor::{decorate, Decorations};
 pub use text::REGULAR as FELL_REGULAR;
 
 use worldgen_core::history::HistoryState;
@@ -38,8 +40,11 @@ pub trait MapStyle {
     /// lettering), drawn onto a copy of the cached landscape.
     fn render_year(&self, world: &World, state: &HistoryState, landscape: &Canvas) -> Canvas;
 
-    /// The whole map for one year, without caching (tests now; export later).
-    #[allow(dead_code)]
+    /// The same style drawn at `scale` canvas pixels per world cell (for
+    /// export).
+    fn scaled(&self, scale: usize) -> Box<dyn MapStyle>;
+
+    /// The whole map for one year, without caching (export and tests).
     fn render(&self, world: &World, state: &HistoryState) -> Canvas {
         self.render_year(world, state, &self.render_landscape(world))
     }
