@@ -2,7 +2,7 @@
 //!
 //! Stages: tectonics and noise (independent) → blended heightmap → erosion →
 //! climate → hydrology → biomes → habitability and travel cost → peoples →
-//! settlements → realms. Erosion can take seconds, so besides the blocking
+//! settlements → realms → history. Erosion can take seconds, so besides the blocking
 //! [`World::generate`] and [`World::update`] there is an incremental path:
 //! [`World::set_config`] runs the cheap stages straight away and queues
 //! erosion and everything after it, and [`World::advance`] does the queued
@@ -15,12 +15,16 @@ use crate::erosion::{erode, ErosionJob};
 use crate::fractal::fbm_field;
 use crate::habitability::{generate_habitability, Habitability};
 use crate::heightmap::{blend_heightmap, Heightmap};
+use crate::history::{History, HistoryJob};
 use crate::hydrology::{generate_hydrology, Hydrology};
 use crate::peoples::{generate_peoples, Peoples};
 use crate::realms::{generate_realms, Realms};
 use crate::settlements::{generate_settlements, SettlementInputs, Settlements};
 use crate::tectonics::{generate_tectonics, TectonicMap};
 use crate::travel::travel_cost_grid;
+
+/// Years of history simulated per unit of `World::advance` budget.
+pub const HISTORY_YEARS_PER_ROUND: usize = 25;
 
 /// A generated world: the config it came from plus every stage's output.
 #[derive(Clone, Debug, PartialEq)]
@@ -51,6 +55,8 @@ pub struct World {
     pub settlements: Settlements,
     /// Stage: the political map at year 0.
     pub realms: Realms,
+    /// Stage: the event log of everything after year 0.
+    pub history: History,
     /// Work queued by `set_config` and not yet done by `advance`.
     pending: Pending,
 }
@@ -66,6 +72,9 @@ struct Pending {
     peoples: bool,
     settlements: bool,
     realms: bool,
+    /// History must be rebuilt once the stages it reads are up to date.
+    history_restart: bool,
+    history: Option<HistoryJob>,
 }
 
 /// Which stages a config change re-ran or queued.
@@ -83,6 +92,7 @@ pub struct StagesRun {
     pub peoples: bool,
     pub settlements: bool,
     pub realms: bool,
+    pub history: bool,
 }
 
 impl World {
@@ -114,6 +124,15 @@ impl World {
             peoples: &peoples,
         });
         let realms = generate_realms(config, &biomes, &peoples, &settlements, &travel_cost);
+        let history = HistoryJob::new(
+            config,
+            &biomes,
+            &habitability,
+            &peoples,
+            &settlements,
+            &realms,
+        )
+        .finish();
         Self {
             config: config.clone(),
             tectonics,
@@ -128,6 +147,7 @@ impl World {
             peoples,
             settlements,
             realms,
+            history,
             pending: Pending::default(),
         }
     }
@@ -169,6 +189,11 @@ impl World {
             || config.settlements != old.settlements
             || config.politics.target_realms != old.politics.target_realms;
         let realms = settlements || travel || config.realms != old.realms;
+        let history = realms
+            || self.pending.history.is_some()
+            || config.history != old.history
+            || config.politics.empire_formation != old.politics.empire_formation
+            || config.politics.fragmentation_rate != old.politics.fragmentation_rate;
         let run = StagesRun {
             tectonics,
             noise,
@@ -182,6 +207,7 @@ impl World {
             peoples,
             settlements,
             realms,
+            history,
         };
 
         if tectonics {
@@ -204,6 +230,11 @@ impl World {
         self.pending.peoples |= peoples;
         self.pending.settlements |= settlements;
         self.pending.realms |= realms;
+        if history {
+            // Restarted once everything it reads is up to date (in advance).
+            self.pending.history = None;
+            self.pending.history_restart = true;
+        }
         self.config = config.clone();
         // Without erosion to wait for, the rest is quick: do it now.
         if self.pending.erosion.is_none() {
@@ -215,9 +246,11 @@ impl World {
     /// Does up to `max_erosion_rounds` rounds of queued erosion, then any
     /// later stages once erosion is done. Returns true when the world is
     /// fully up to date.
-    pub fn advance(&mut self, max_erosion_rounds: usize) -> bool {
+    /// `budget` is in erosion rounds; history gets
+    /// [`HISTORY_YEARS_PER_ROUND`] years per round.
+    pub fn advance(&mut self, budget: usize) -> bool {
         if let Some(job) = &mut self.pending.erosion {
-            job.step(max_erosion_rounds);
+            job.step(budget);
             if !job.is_done() {
                 return false;
             }
@@ -288,6 +321,29 @@ impl World {
                 &self.travel_cost,
             );
             self.pending.realms = false;
+            self.pending.history_restart = true;
+        }
+        if self.pending.history_restart {
+            self.pending.history = Some(HistoryJob::new(
+                &self.config,
+                &self.biomes,
+                &self.habitability,
+                &self.peoples,
+                &self.settlements,
+                &self.realms,
+            ));
+            self.pending.history_restart = false;
+        }
+        if let Some(job) = &mut self.pending.history {
+            let years = budget
+                .saturating_mul(HISTORY_YEARS_PER_ROUND)
+                .min(u32::MAX as usize) as u32;
+            job.step(years);
+            if !job.is_done() {
+                return false;
+            }
+            let job = self.pending.history.take().expect("checked above");
+            self.history = job.finish();
         }
         true
     }
@@ -303,6 +359,14 @@ impl World {
     }
 
     /// Progress of the queued erosion run, if one is in progress.
+    /// Progress of the queued history run, if one is in progress.
+    pub fn history_progress(&self) -> Option<f32> {
+        if self.pending.history_restart {
+            return Some(0.0);
+        }
+        self.pending.history.as_ref().map(HistoryJob::progress)
+    }
+
     pub fn erosion_progress(&self) -> Option<f32> {
         self.pending.erosion.as_ref().map(ErosionJob::progress)
     }
@@ -340,6 +404,9 @@ mod tests {
         }
         if run.settlements || run.travel {
             run.realms = true;
+        }
+        if run.realms {
+            run.history = true;
         }
         run
     }
@@ -436,7 +503,7 @@ mod tests {
         let mut config = small(42);
         config.biomes.edge_jitter_c = 5.0;
         assert_eq!(world.set_config(&config), only(|r| r.biomes = true));
-        assert!(world.is_ready());
+        world.finish();
         assert_eq!(world, World::generate(&config));
     }
 
@@ -446,6 +513,7 @@ mod tests {
         let mut config = small(42);
         config.peoples.count = 4;
         assert_eq!(world.set_config(&config), only(|r| r.peoples = true));
+        world.finish();
         assert_eq!(world, World::generate(&config));
     }
 
@@ -459,6 +527,7 @@ mod tests {
             let mut config = small(42);
             change(&mut config);
             assert_eq!(world.set_config(&config), only(|r| r.settlements = true));
+            world.finish();
             assert_eq!(world, World::generate(&config));
         }
     }
@@ -469,17 +538,28 @@ mod tests {
         let mut config = small(42);
         config.realms.max_reach = 60.0;
         assert_eq!(world.set_config(&config), only(|r| r.realms = true));
+        world.finish();
         assert_eq!(world, World::generate(&config));
     }
 
     #[test]
-    fn story_settings_rerun_nothing() {
+    fn magic_reruns_nothing_and_history_settings_rerun_only_history() {
         let mut world = World::generate(&small(42));
         let mut config = small(42);
         config.magic.level = crate::config::MagicLevel::Saturated;
-        config.history.years = 9000;
-        config.politics.empire_formation = 0.9;
         assert_eq!(world.set_config(&config), StagesRun::default());
+
+        config.history.years = 300;
+        config.politics.empire_formation = 0.9;
+        assert_eq!(
+            world.set_config(&config),
+            StagesRun {
+                history: true,
+                ..Default::default()
+            }
+        );
+        world.finish();
+        assert_eq!(world, World::generate(&config));
     }
 
     #[test]
@@ -488,6 +568,7 @@ mod tests {
         let mut config = small(42);
         config.travel.sea_cost = 30.0;
         assert_eq!(world.set_config(&config), only(|r| r.travel = true));
+        world.finish();
         assert_eq!(world, World::generate(&config));
     }
 
@@ -503,7 +584,7 @@ mod tests {
                 r.biomes = true;
             })
         );
-        assert!(world.is_ready());
+        world.finish();
         assert_eq!(world, World::generate(&config));
     }
 
@@ -524,7 +605,7 @@ mod tests {
                     r.biomes = true;
                 })
             );
-            assert!(world.is_ready(), "climate-only changes finish immediately");
+            world.finish();
             assert_eq!(world, World::generate(&config));
         }
     }
@@ -549,11 +630,14 @@ mod tests {
         world.set_config(&config);
         assert!(!world.is_ready());
         let mut last = world.erosion_progress().unwrap();
-        while !world.advance(1) {
-            let now = world.erosion_progress().unwrap();
-            assert!(now > last);
-            last = now;
+        while world.erosion_progress().is_some() {
+            world.advance(1);
+            if let Some(now) = world.erosion_progress() {
+                assert!(now > last);
+                last = now;
+            }
         }
+        world.finish();
         assert!(world.is_ready());
         assert_eq!(world, World::generate(&config));
     }

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Bump when a change makes existing configs produce different worlds (new
 /// RNG derivation, changed algorithm or defaults), so saved configs can be
 /// detected as coming from an older generator.
-pub const GENERATOR_VERSION: u32 = 7;
+pub const GENERATOR_VERSION: u32 = 8;
 
 pub const MIN_PLATES: usize = 8;
 pub const MAX_PLATES: usize = 40;
@@ -68,9 +68,9 @@ impl Default for WorldConfig {
     }
 }
 
-// The sections below describe the world's story. No stage reads them yet;
-// they are carried in configs, presets and share links so later stages
-// (settlements, realms, history) can use them.
+// The sections below describe the world's story. Politics and history drive
+// the settlement, realm and history stages; magic and disasters are carried
+// for stages still to come.
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -163,11 +163,17 @@ pub const MAX_HISTORY_YEARS: u32 = 20_000;
 pub struct HistoryConfig {
     /// Years of history to simulate.
     pub years: u32,
+    /// Years between stored snapshots of the state. Smaller makes looking up
+    /// a year faster and uses more memory.
+    pub snapshot_interval: u32,
 }
 
 impl Default for HistoryConfig {
     fn default() -> Self {
-        Self { years: 2000 }
+        Self {
+            years: 2000,
+            snapshot_interval: 50,
+        }
     }
 }
 

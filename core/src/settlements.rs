@@ -20,7 +20,9 @@ use crate::rng::{entity_rng, stage, unit_f32};
 
 pub const NO_SETTLEMENT: u32 = u32::MAX;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum Rank {
     Village,
     Town,
