@@ -28,7 +28,11 @@ fn smoothed(world: &World, cells: &[u32], s: f32) -> Vec<[f32; 2]> {
 
 /// Calls `mark` at points every `step` pixels along a polyline, with the
 /// local direction.
-fn walk(points: &[[f32; 2]], step: f32, mut mark: impl FnMut([f32; 2], [f32; 2], usize)) {
+pub(super) fn walk(
+    points: &[[f32; 2]],
+    step: f32,
+    mut mark: impl FnMut([f32; 2], [f32; 2], usize),
+) {
     let mut carry = 0.0;
     let mut count = 0;
     for pair in points.windows(2) {

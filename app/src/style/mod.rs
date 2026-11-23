@@ -14,6 +14,7 @@ mod lettering;
 mod network;
 mod text;
 mod util;
+mod wonders;
 
 pub use antique::AntiqueStyle;
 pub use borders::realm_colour;

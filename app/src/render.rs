@@ -148,6 +148,59 @@ pub fn realms_at(
     ColorImage::from_rgb([state.width, state.height], &rgb)
 }
 
+pub const LEYLINE_RGB: Rgb = [170, 90, 200];
+pub const BLIGHT_RGB: Rgb = [120, 130, 40];
+
+pub fn landmark_rgb(kind: worldgen_core::landmarks::LandmarkKind) -> Rgb {
+    use worldgen_core::landmarks::LandmarkKind;
+    match kind {
+        LandmarkKind::DragonDen => [220, 40, 30],
+        LandmarkKind::ElderRuin => [150, 100, 50],
+        LandmarkKind::LeylineNexus => [200, 120, 255],
+        LandmarkKind::DrownedCity => [60, 170, 230],
+        LandmarkKind::BlightedRuin => [60, 65, 20],
+    }
+}
+
+/// Landmarks at a year: dimmed terrain, leylines, the Blight, and a square
+/// for each landmark in its kind's colour.
+pub fn landmarks_at(
+    world: &worldgen_core::World,
+    state: &worldgen_core::history::HistoryState,
+) -> ColorImage {
+    let (w, h) = (state.width, state.height);
+    let sea = world.config.terrain.sea_level;
+    let mut rgb: Vec<Rgb> = (0..w * h)
+        .map(|i| {
+            let c = hypsometric_colour(world.terrain.data[i], sea);
+            c.map(|v| (v as f32 * 0.45 + 60.0) as u8)
+        })
+        .collect();
+    for line in &world.landmarks.leylines {
+        for p in &line.points {
+            let (x, y) = (p[0] as usize, p[1] as usize);
+            if x < w && y < h {
+                rgb[y * w + x] = LEYLINE_RGB;
+            }
+        }
+    }
+    for (i, &b) in state.blight.iter().enumerate() {
+        if b {
+            rgb[i] = BLIGHT_RGB;
+        }
+    }
+    for l in &state.landmarks {
+        let (x, y) = (l.cell as usize % w, l.cell as usize / w);
+        for ny in y.saturating_sub(2)..(y + 3).min(h) {
+            for nx in x.saturating_sub(2)..(x + 3).min(w) {
+                rgb[ny * w + nx] = landmark_rgb(l.kind);
+            }
+        }
+    }
+    let flat: Vec<u8> = rgb.into_iter().flatten().collect();
+    ColorImage::from_rgb([w, h], &flat)
+}
+
 /// Realms in their wash colours (stronger than on the map), wilderness grey.
 pub fn realms(world: &worldgen_core::World) -> ColorImage {
     let r = &world.realms;

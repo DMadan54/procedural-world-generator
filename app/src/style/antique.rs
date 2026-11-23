@@ -12,6 +12,7 @@ use super::canvas::{Canvas, Colour};
 use super::lettering;
 use super::network;
 use super::util::{bilinear, chaikin, distance_to, hash, mix, value_noise};
+use super::wonders;
 use super::MapStyle;
 
 const PARCHMENT: Colour = [0.925, 0.875, 0.745];
@@ -224,6 +225,8 @@ impl MapStyle for AntiqueStyle {
             canvas.polyline(&points, &widths, INK_RIVER, 0.9);
         }
 
+        wonders::draw_leylines(&mut canvas, world, s);
+
         // Glyphs.
         let mut glyphs = Vec::new();
         self.place_relief(world, s, &tint_at, &mut glyphs);
@@ -247,11 +250,13 @@ impl MapStyle for AntiqueStyle {
         let s = self.scale.max(1) as f32;
         let mut canvas = landscape.clone();
         borders::wash(&mut canvas, state, s);
+        wonders::draw_blight(&mut canvas, world, state, s);
         borders::frontiers(&mut canvas, world, state, s);
         lettering::draw_realm_names(&mut canvas, state, s);
         lettering::draw_people_names(&mut canvas, world, state, s);
         lettering::draw_settlements(&mut canvas, state, s);
         lettering::draw_battles(&mut canvas, state, s);
+        wonders::draw_landmarks(&mut canvas, state, s);
         lettering::draw_settlement_labels(&mut canvas, world, state, s);
         frame(&mut canvas, s);
         canvas

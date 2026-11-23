@@ -66,10 +66,13 @@ enum DebugView {
     Trade,
     /// History stage: alliances, wars, pacts and vassals at the slider year.
     Diplomacy,
+    /// Landmarks stage: dens, ruins, nexuses, drowned cities, leylines and
+    /// the Blight at the slider year.
+    Landmarks,
 }
 
 impl DebugView {
-    const ALL: [DebugView; 20] = [
+    const ALL: [DebugView; 21] = [
         DebugView::Terrain,
         DebugView::Plates,
         DebugView::TectonicRelief,
@@ -90,6 +93,7 @@ impl DebugView {
         DebugView::Network,
         DebugView::Trade,
         DebugView::Diplomacy,
+        DebugView::Landmarks,
     ];
 
     fn label(self) -> &'static str {
@@ -114,6 +118,7 @@ impl DebugView {
             DebugView::Network => "Roads and sea lanes",
             DebugView::Trade => "Trade by year",
             DebugView::Diplomacy => "Diplomacy by year",
+            DebugView::Landmarks => "Landmarks and the Blight",
         }
     }
 }
@@ -335,6 +340,7 @@ impl WorldGenApp {
             DebugView::HistoryRealms | DebugView::Diplomacy => {
                 render::realms_at(&self.world, state)
             }
+            DebugView::Landmarks => render::landmarks_at(&self.world, state),
             DebugView::Resources | DebugView::Network | DebugView::Trade => {
                 render::wind_background(map, sea)
             }
@@ -625,6 +631,41 @@ impl WorldGenApp {
                     }
                 }
             }
+            Some(DebugView::Landmarks) => {
+                for (kind, label) in [
+                    (
+                        worldgen_core::landmarks::LandmarkKind::DragonDen,
+                        "Dragon den",
+                    ),
+                    (
+                        worldgen_core::landmarks::LandmarkKind::ElderRuin,
+                        "Elder ruin",
+                    ),
+                    (
+                        worldgen_core::landmarks::LandmarkKind::LeylineNexus,
+                        "Leyline nexus",
+                    ),
+                    (
+                        worldgen_core::landmarks::LandmarkKind::DrownedCity,
+                        "Drowned city",
+                    ),
+                    (
+                        worldgen_core::landmarks::LandmarkKind::BlightedRuin,
+                        "Town lost to the Blight",
+                    ),
+                ] {
+                    legend_row(ui, render::landmark_rgb(kind), label);
+                }
+                legend_row(ui, render::LEYLINE_RGB, "Leyline");
+                legend_row(ui, render::BLIGHT_RGB, "The Blight");
+                if let Some(state) = &self.state {
+                    ui.weak(format!(
+                        "Blight at this year: {} leagues",
+                        state.blight_extent()
+                    ));
+                }
+                ui.weak("Hover a landmark on any map for its story.");
+            }
             Some(DebugView::Diplomacy) => {
                 for (colour, label) in [
                     ([40, 160, 60], "Alliance"),
@@ -807,7 +848,9 @@ impl WorldGenApp {
             egui::Image::new(&texture).paint_at(ui, rect);
             let response = ui.allocate_rect(rect, egui::Sense::click());
             if let Some(pointer) = response.hover_pos() {
-                self.settlement_tooltip(&response, rect, pointer);
+                if !self.landmark_tooltip(&response, rect, pointer) {
+                    self.settlement_tooltip(&response, rect, pointer);
+                }
             }
             if response.clicked() {
                 if let (Some(pointer), Some(state)) = (response.interact_pointer_pos(), &self.state)
@@ -902,6 +945,73 @@ impl WorldGenApp {
 impl WorldGenApp {
     /// When the pointer is over (or right next to) a settlement, shows its
     /// name, rank, people, population and features.
+    /// A landmark's name, story hook and fate so far, if the pointer is on
+    /// one. Returns whether it showed.
+    fn landmark_tooltip(&self, response: &egui::Response, rect: Rect, pointer: egui::Pos2) -> bool {
+        use worldgen_core::history::Dragon;
+        use worldgen_core::landmarks::LandmarkKind;
+        let Some(state) = &self.state else {
+            return false;
+        };
+        let w = state.width.max(1);
+        let cell = rect.width() / w as f32;
+        let (wx, wy) = (
+            (pointer.x - rect.left()) / cell,
+            (pointer.y - rect.top()) / cell,
+        );
+        let reach = (6.0 / cell).max(2.0);
+        let nearest = state
+            .landmarks
+            .iter()
+            .map(|l| {
+                let c = l.cell as usize;
+                let (dx, dy) = ((c % w) as f32 + 0.5 - wx, (c / w) as f32 + 0.5 - wy);
+                (dx * dx + dy * dy, l)
+            })
+            .filter(|(d2, _)| *d2 <= reach * reach)
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        let Some((_, landmark)) = nearest else {
+            return false;
+        };
+        let realm = |r: u16| {
+            state
+                .realms
+                .get(r as usize)
+                .map_or("?", |r| r.name.as_str())
+        };
+        response.clone().on_hover_ui_at_pointer(|ui| {
+            ui.set_max_width(300.0);
+            ui.strong(capitalised(&landmark.name));
+            ui.weak(capitalised(landmark.kind.name()));
+            ui.label(&landmark.hook);
+            let fate = match (landmark.kind, landmark.dragon) {
+                (LandmarkKind::DragonDen, Some(Dragon::Asleep)) => {
+                    Some("The dragon sleeps.".to_owned())
+                }
+                (LandmarkKind::DragonDen, Some(Dragon::Awake)) => {
+                    Some("The dragon is awake and hunting.".to_owned())
+                }
+                (LandmarkKind::DragonDen, Some(Dragon::Slain)) => {
+                    Some("The dragon is dead; its hoard was carried off.".to_owned())
+                }
+                (LandmarkKind::ElderRuin, _) => landmark
+                    .discovered_by
+                    .map(|r| format!("Plundered by {}.", realm(r))),
+                (LandmarkKind::LeylineNexus, _) => {
+                    landmark.holder.map(|r| format!("Held by {}.", realm(r)))
+                }
+                _ => None,
+            };
+            if let Some(fate) = fate {
+                ui.label(egui::RichText::new(fate).italics());
+            }
+            if state.blight.get(landmark.cell as usize) == Some(&true) {
+                ui.label(egui::RichText::new("Under the Blight.").italics());
+            }
+        });
+        true
+    }
+
     fn settlement_tooltip(&self, response: &egui::Response, rect: Rect, pointer: egui::Pos2) {
         let s = &self.world.settlements;
         if s.width == 0 {
@@ -1491,7 +1601,10 @@ impl eframe::App for WorldGenApp {
         }
         let yearly = matches!(
             self.view,
-            DebugView::HistoryRealms | DebugView::Trade | DebugView::Diplomacy
+            DebugView::HistoryRealms
+                | DebugView::Trade
+                | DebugView::Diplomacy
+                | DebugView::Landmarks
         );
         if year_changed && (self.style.is_some() || yearly) {
             self.texture_dirty = true;
