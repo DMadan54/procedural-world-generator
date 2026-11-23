@@ -8,6 +8,7 @@
 //! heavily where terrain forces them upwards, so the far side of a range is
 //! left in a rain shadow.
 
+use crate::dmath;
 use noise::{Fbm, MultiFractal, NoiseFn, Perlin};
 use rand_chacha::rand_core::RngCore;
 
@@ -59,7 +60,8 @@ pub fn elevation_m(height: f32, terrain: &TerrainConfig) -> f32 {
 /// Mean temperature (°C) at a latitude and altitude, before random variation.
 pub fn temperature_at(latitude: f32, elevation_m: f32, config: &ClimateConfig) -> f32 {
     let sea_level = config.pole_temperature
-        + (config.equator_temperature - config.pole_temperature) * latitude.to_radians().cos();
+        + (config.equator_temperature - config.pole_temperature)
+            * dmath::cos(latitude.to_radians());
     sea_level - config.lapse_rate * elevation_m / 1000.0 + config.global_temperature_offset
 }
 
@@ -83,14 +85,14 @@ pub fn prevailing_wind(latitude: f32) -> [f32; 2] {
 /// Relative amount of water vapour air can hold at a temperature (1.0 at
 /// 25 °C, roughly doubling every 10 °C).
 fn moisture_capacity(temperature: f32) -> f32 {
-    (0.07 * (temperature - 25.0)).exp()
+    dmath::exp(0.07 * (temperature - 25.0))
 }
 
 /// Large-scale rain tendency by latitude: wet along the equator where the
 /// trades converge, dry around 30° under the subtropical highs.
 fn rain_tendency(latitude: f32) -> f32 {
-    let equatorial = 2.0 * (-(latitude / 8.0).powi(2)).exp();
-    let subtropical = 0.7 * (-((latitude.abs() - 28.0) / 8.0).powi(2)).exp();
+    let equatorial = 2.0 * dmath::exp(-dmath::sq(latitude / 8.0));
+    let subtropical = 0.7 * dmath::exp(-dmath::sq((latitude.abs() - 28.0) / 8.0));
     (1.0 + equatorial) * (1.0 - subtropical)
 }
 

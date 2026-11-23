@@ -8,6 +8,7 @@
 //! rather than clipped.
 
 use crate::config::{BlendConfig, WorldConfig};
+use crate::dmath;
 use crate::tectonics::TectonicMap;
 
 /// A grid of heights, row-major, each in `0.0..1.0`.
@@ -60,9 +61,9 @@ pub fn to_height(raw: f32, params: &BlendConfig) -> f32 {
 fn soft_limit(h: f32) -> f32 {
     if h > HIGH_KNEE {
         let span = 1.0 - HIGH_KNEE;
-        HIGH_KNEE + span * ((h - HIGH_KNEE) / span).tanh()
+        HIGH_KNEE + span * dmath::tanh((h - HIGH_KNEE) / span)
     } else if h < LOW_KNEE {
-        LOW_KNEE - LOW_KNEE * ((LOW_KNEE - h) / LOW_KNEE).tanh()
+        LOW_KNEE - LOW_KNEE * dmath::tanh((LOW_KNEE - h) / LOW_KNEE)
     } else {
         h
     }

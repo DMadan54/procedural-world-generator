@@ -9,6 +9,7 @@
 //! `MagicLevel` scales the magical kinds; at `None` only mundane landmarks
 //! appear.
 
+use crate::dmath;
 use rand_chacha::rand_core::RngCore;
 use serde::{Deserialize, Serialize};
 
@@ -177,7 +178,7 @@ pub fn generate_landmarks(input: &LandmarkInputs) -> Landmarks {
                 (f % w) as f32 - (cell % w) as f32,
                 (f / w) as f32 - (cell / w) as f32,
             );
-            dx * dx + dy * dy > (80.0 * reference).powi(2)
+            dx * dx + dy * dy > dmath::sq(80.0 * reference)
         });
         if input.terrain.data[cell] >= sea && far {
             focus_cells.push(cell);
@@ -261,12 +262,12 @@ fn pick(
 /// A gently bent line through `focus` at `angle`, clipped to the map.
 fn leyline(focus: usize, angle: f32, w: usize, h: usize, bend: f32, _seed: usize) -> Leyline {
     let (fx, fy) = ((focus % w) as f32, (focus / w) as f32);
-    let (dx, dy) = (angle.cos(), angle.sin());
+    let (dx, dy) = (dmath::cos(angle), dmath::sin(angle));
     let reach = (w.max(h) as f32) * 1.5;
     let mut points = Vec::new();
     for k in 0..=96 {
         let t = (k as f32 / 96.0 - 0.5) * 2.0 * reach;
-        let sway = bend * 0.15 * reach * (std::f32::consts::PI * t / reach).sin();
+        let sway = bend * 0.15 * reach * dmath::sin(std::f32::consts::PI * t / reach);
         let (x, y) = (fx + dx * t - dy * sway, fy + dy * t + dx * sway);
         if x >= 0.0 && y >= 0.0 && x < w as f32 && y < h as f32 {
             points.push([x, y]);
@@ -345,7 +346,7 @@ impl<'a> Describer<'a> {
 
     fn dist(&self, a: usize, b: usize) -> f32 {
         let w = self.input.terrain.width;
-        (((a % w) as f32 - (b % w) as f32).powi(2) + ((a / w) as f32 - (b / w) as f32).powi(2))
+        (dmath::sq((a % w) as f32 - (b % w) as f32) + dmath::sq((a / w) as f32 - (b / w) as f32))
             .sqrt()
     }
 

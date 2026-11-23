@@ -6,6 +6,7 @@
 //! later decisions in the same year see it. Runs incrementally: a job steps
 //! a few years at a time so the web build stays responsive.
 
+use crate::dmath;
 use rand_chacha::rand_core::RngCore;
 use rand_chacha::ChaCha8Rng;
 
@@ -532,7 +533,7 @@ impl HistoryJob {
                 continue;
             }
             let age = year as i32 - ruler.born;
-            let death = (0.004 * (0.06 * (age - 30) as f32).exp()).clamp(0.003, 0.5);
+            let death = (0.004 * dmath::exp(0.06 * (age - 30) as f32)).clamp(0.003, 0.5);
             if unit_f32(rng) >= death {
                 continue;
             }
@@ -693,7 +694,7 @@ impl HistoryJob {
                     let score = |s: u32| {
                         let st = &self.state.settlements[s as usize];
                         let c = st.cell as usize;
-                        let d2 = ((c % w) as f32 - cx).powi(2) + ((c / w) as f32 - cy).powi(2);
+                        let d2 = dmath::sq((c % w) as f32 - cx) + dmath::sq((c / w) as f32 - cy);
                         d2 * st.population as f32
                     };
                     score(a).total_cmp(&score(b)).then(b.cmp(&a))
@@ -707,7 +708,7 @@ impl HistoryJob {
                 .filter(|&c| self.state.owner[c as usize] == id)
                 .filter(|&c| {
                     let (x, y) = ((c as usize % w) as f32, (c as usize / w) as f32);
-                    (x - sx).powi(2) + (y - sy).powi(2) < (x - cx).powi(2) + (y - cy).powi(2)
+                    dmath::sq(x - sx) + dmath::sq(y - sy) < dmath::sq(x - cx) + dmath::sq(y - cy)
                 })
                 .collect();
             if (cells.len() as f32) < 0.1 * realm.cells as f32 {
@@ -817,7 +818,7 @@ impl HistoryJob {
             let land = self.ctx.habitability[cell as usize];
             self.ctx
                 .capacity
-                .push(self.ctx.base_population * 0.6 * land.powf(1.5));
+                .push(self.ctx.base_population * 0.6 * dmath::powf(land, 1.5));
             self.ctx.output.push(deposit_output(
                 cell as usize,
                 &self.ctx.deposits,

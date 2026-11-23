@@ -8,6 +8,7 @@
 //! ordinary border changes, capitals can be besieged, allies are called in,
 //! and wars end in peace terms once a side is exhausted.
 
+use crate::dmath;
 use std::collections::BTreeSet;
 
 use rand_chacha::rand_core::RngCore;
@@ -711,7 +712,7 @@ impl HistoryJob {
             .filter(|(_, s)| s.alive)
             .map(|(i, s)| {
                 let (x, y) = ((s.cell as usize % w) as f32, (s.cell as usize / w) as f32);
-                ((x - sx).powi(2) + (y - sy).powi(2), i)
+                (dmath::sq(x - sx) + dmath::sq(y - sy), i)
             })
             .filter(|&(d2, _)| d2 <= reach * reach)
             .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));

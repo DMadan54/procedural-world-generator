@@ -7,6 +7,7 @@
 //! their language. Ranks come from estimated population, with about
 //! `politics.target_realms` capitals.
 
+use crate::dmath;
 use std::collections::BTreeSet;
 
 use crate::biome::{Biome, Biomes};
@@ -189,7 +190,7 @@ pub fn generate_settlements(input: &SettlementInputs) -> Settlements {
             let land = mean_habitability(cell, w, h, catchment, input.habitability);
             // Bigger rivers carry more trade: up to +100% on the largest.
             let river = largest_river_nearby(cell, w, h, input.hydrology) / threshold;
-            let river_boost = (river.max(1.0).log2() / 6.0).min(1.0);
+            let river_boost = (dmath::log2(river.max(1.0)) / 6.0).min(1.0);
             let boost = 1.0 + river_boost + 0.4 * flags.port as u32 as f32;
             // Skewed so a few places grow much larger than the rest.
             let u = unit_f32(rng);
@@ -200,7 +201,7 @@ pub fn generate_settlements(input: &SettlementInputs) -> Settlements {
                 name: String::new(),
                 people: input.peoples.homeland[cell],
                 rank: Rank::Village,
-                population: (p.base_population * land.powf(1.5) * boost * jitter)
+                population: (p.base_population * dmath::powf(land, 1.5) * boost * jitter)
                     .round()
                     .max(20.0) as u32,
                 flags,
@@ -461,7 +462,8 @@ mod tests {
             let need = spacing(p, world.habitability.value[later.cell]) * w as f32 / 512.0;
             for earlier in &list[..i] {
                 let ([ax, ay], [bx, by]) = (earlier.position(w), later.position(w));
-                let d = ((ax as f32 - bx as f32).powi(2) + (ay as f32 - by as f32).powi(2)).sqrt();
+                let d =
+                    (dmath::sq(ax as f32 - bx as f32) + dmath::sq(ay as f32 - by as f32)).sqrt();
                 assert!(
                     d >= need,
                     "{} and {} are {d:.1} apart, need {need:.1}",

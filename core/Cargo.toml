@@ -12,6 +12,9 @@ noise.workspace = true
 rand_chacha.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# Platform-independent maths (exp, powf, sin...) so worlds are identical
+# on every OS and on wasm.
+libm = "0.2"
 rayon = { workspace = true, optional = true }
 
 [features]

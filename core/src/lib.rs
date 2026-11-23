@@ -18,6 +18,7 @@ pub mod biome;
 pub mod chronicle;
 pub mod climate;
 pub mod config;
+pub mod dmath;
 pub mod erosion;
 pub mod export;
 mod field;

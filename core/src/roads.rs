@@ -7,6 +7,7 @@
 //! them and sea lanes link nearby ports. Shortest paths over the whole
 //! network are precomputed for trade.
 
+use crate::dmath;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeSet, BinaryHeap};
 
@@ -115,7 +116,7 @@ pub fn generate_roads(
     };
     let dist = |a: u32, b: u32| {
         let ((ax, ay), (bx, by)) = (pos(a), pos(b));
-        ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt()
+        (dmath::sq(ax - bx) + dmath::sq(ay - by)).sqrt()
     };
 
     let mut links = Vec::new();

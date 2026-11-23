@@ -9,6 +9,7 @@
 //! - divergent boundaries open rifts on land and raise ridges in the ocean;
 //! - transform boundaries barely change the terrain.
 
+use crate::dmath;
 use std::collections::BTreeMap;
 
 use noise::{Fbm, MultiFractal, NoiseFn, Perlin};
@@ -184,7 +185,7 @@ fn scatter_plates(
             let speed = 0.2 + 0.8 * unit_f32(rng);
             Plate {
                 centre,
-                drift: [angle.cos() * speed, angle.sin() * speed],
+                drift: [dmath::cos(angle) * speed, dmath::sin(angle) * speed],
                 kind,
             }
         })

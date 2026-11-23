@@ -6,6 +6,7 @@
 //! Draws from its own stream (`history.disasters`), so turning disasters
 //! off or changing their rates leaves the rest of history's dice alone.
 
+use crate::dmath;
 use rand_chacha::rand_core::RngCore;
 use rand_chacha::ChaCha8Rng;
 
@@ -406,7 +407,7 @@ impl HistoryJob {
             return;
         }
         let cell = self.ctx.quake_sites[(rng.next_u32() as usize) % self.ctx.quake_sites.len()];
-        let magnitude = 5.5 + 2.5 * unit_f32(rng).powi(2);
+        let magnitude = 5.5 + 2.5 * dmath::sq(unit_f32(rng));
         let quake = self.emit(
             year,
             EventKind::Earthquake {
@@ -418,7 +419,7 @@ impl HistoryJob {
         let radius = (magnitude - 4.5) * 18.0 * self.reference();
         let strength = (magnitude - 5.0) / 3.0;
         for (s, d) in self.settlements_near(cell, radius) {
-            let share = 0.45 * strength * (1.0 - d / radius).powf(1.5);
+            let share = 0.45 * strength * dmath::powf(1.0 - d / radius, 1.5);
             if share < 0.03 {
                 continue;
             }
