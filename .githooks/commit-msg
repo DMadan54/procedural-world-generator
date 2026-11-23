@@ -5,8 +5,9 @@
 msg_file="$1"
 pattern='co-authored-by|generated with|claude-session|claude\.ai|anthropic\.com'
 
-# Ignore comment lines git adds to the message template.
-matches=$(grep -v '^#' "$msg_file" | grep -inE "$pattern")
+# Number lines as they are in the message, then drop the comment lines git
+# adds to the template.
+matches=$(grep -inE "$pattern" "$msg_file" | grep -v '^[0-9]*:#')
 if [ -n "$matches" ]; then
     echo "commit-msg: rejected, the message contains attribution:" >&2
     echo "$matches" | sed 's/^/  line /' >&2
