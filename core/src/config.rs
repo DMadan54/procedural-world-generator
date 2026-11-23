@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Bump when a change makes existing configs produce different worlds (new
 /// RNG derivation, changed algorithm or defaults), so saved configs can be
 /// detected as coming from an older generator.
-pub const GENERATOR_VERSION: u32 = 9;
+pub const GENERATOR_VERSION: u32 = 10;
 
 pub const MIN_PLATES: usize = 8;
 pub const MAX_PLATES: usize = 40;
@@ -34,6 +34,7 @@ pub struct WorldConfig {
     pub peoples: PeoplesConfig,
     pub settlements: SettlementConfig,
     pub resources: ResourceConfig,
+    pub roads: RoadConfig,
     pub realms: RealmConfig,
     pub magic: MagicConfig,
     pub politics: PoliticsConfig,
@@ -61,6 +62,7 @@ impl Default for WorldConfig {
             peoples: PeoplesConfig::default(),
             settlements: SettlementConfig::default(),
             resources: ResourceConfig::default(),
+            roads: RoadConfig::default(),
             realms: RealmConfig::default(),
             magic: MagicConfig::default(),
             politics: PoliticsConfig::default(),
@@ -199,6 +201,42 @@ impl Default for TerrainConfig {
 }
 
 pub const MAX_DROPLETS: u32 = 1_000_000;
+
+/// Roads, river links and sea lanes. Distances are in cells of a 512-wide
+/// map; costs are in travel-cost units (see `TravelConfig`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RoadConfig {
+    /// Each settlement is joined to this many of its nearest neighbours.
+    pub neighbours: u32,
+    /// Longest straight-line distance a road is built across.
+    pub max_link_distance: f32,
+    /// Cost multiplier on cells already carrying a road, below 1 so later
+    /// roads join earlier ones.
+    pub road_factor: f32,
+    /// River discharge from which boats can carry trade.
+    pub navigable_discharge: f32,
+    /// Cost per cell along a navigable river.
+    pub river_cost: f32,
+    /// Longest straight-line distance between ports joined by a sea lane.
+    pub sea_range: f32,
+    /// Cost per cell along a sea lane.
+    pub sea_cost: f32,
+}
+
+impl Default for RoadConfig {
+    fn default() -> Self {
+        Self {
+            neighbours: 2,
+            max_link_distance: 60.0,
+            road_factor: 0.35,
+            navigable_discharge: 300.0,
+            river_cost: 0.3,
+            sea_range: 110.0,
+            sea_cost: 0.6,
+        }
+    }
+}
 
 /// Deposits of each resource, in the order ore, timber, grain, salt, gems.
 /// Counts are for a 512x512 world and scale with area; spacings and radii

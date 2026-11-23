@@ -2,7 +2,7 @@
 //!
 //! Stages: tectonics and noise (independent) → blended heightmap → erosion →
 //! climate → hydrology → biomes → habitability and travel cost → peoples →
-//! settlements → resources → realms → history. Erosion can take seconds, so besides the blocking
+//! settlements → resources → roads → realms → history. Erosion can take seconds, so besides the blocking
 //! [`World::generate`] and [`World::update`] there is an incremental path:
 //! [`World::set_config`] runs the cheap stages straight away and queues
 //! erosion and everything after it, and [`World::advance`] does the queued
@@ -20,6 +20,7 @@ use crate::hydrology::{generate_hydrology, Hydrology};
 use crate::peoples::{generate_peoples, Peoples};
 use crate::realms::{generate_realms, Realms};
 use crate::resources::{generate_resources, Resources};
+use crate::roads::{generate_roads, Roads};
 use crate::settlements::{generate_settlements, SettlementInputs, Settlements};
 use crate::tectonics::{generate_tectonics, TectonicMap};
 use crate::travel::travel_cost_grid;
@@ -56,6 +57,8 @@ pub struct World {
     pub settlements: Settlements,
     /// Stage: deposits and what settlements produce.
     pub resources: Resources,
+    /// Stage: roads, river links, sea lanes and the network they form.
+    pub roads: Roads,
     /// Stage: the political map at year 0.
     pub realms: Realms,
     /// Stage: the event log of everything after year 0.
@@ -75,6 +78,7 @@ struct Pending {
     peoples: bool,
     settlements: bool,
     resources: bool,
+    roads: bool,
     realms: bool,
     /// History must be rebuilt once the stages it reads are up to date.
     history_restart: bool,
@@ -96,6 +100,7 @@ pub struct StagesRun {
     pub peoples: bool,
     pub settlements: bool,
     pub resources: bool,
+    pub roads: bool,
     pub realms: bool,
     pub history: bool,
 }
@@ -138,6 +143,7 @@ impl World {
             &habitability,
             &settlements,
         );
+        let roads = generate_roads(config, &hydrology, &biomes, &settlements, &travel_cost);
         let realms = generate_realms(config, &biomes, &peoples, &settlements, &travel_cost);
         let history = HistoryJob::new(
             config,
@@ -162,6 +168,7 @@ impl World {
             peoples,
             settlements,
             resources,
+            roads,
             realms,
             history,
             pending: Pending::default(),
@@ -205,6 +212,7 @@ impl World {
             || config.settlements != old.settlements
             || config.politics.target_realms != old.politics.target_realms;
         let resources = settlements || config.resources != old.resources;
+        let roads = settlements || travel || config.roads != old.roads;
         let realms = settlements || travel || config.realms != old.realms;
         let history = realms
             || self.pending.history.is_some()
@@ -224,6 +232,7 @@ impl World {
             peoples,
             settlements,
             resources,
+            roads,
             realms,
             history,
         };
@@ -248,6 +257,7 @@ impl World {
         self.pending.peoples |= peoples;
         self.pending.settlements |= settlements;
         self.pending.resources |= resources;
+        self.pending.roads |= roads;
         self.pending.realms |= realms;
         if history {
             // Restarted once everything it reads is up to date (in advance).
@@ -330,6 +340,7 @@ impl World {
             });
             self.pending.settlements = false;
             self.pending.resources = true;
+            self.pending.roads = true;
             self.pending.realms = true;
         }
         if self.pending.resources {
@@ -344,6 +355,16 @@ impl World {
                 &self.settlements,
             );
             self.pending.resources = false;
+        }
+        if self.pending.roads {
+            self.roads = generate_roads(
+                &self.config,
+                &self.hydrology,
+                &self.biomes,
+                &self.settlements,
+                &self.travel_cost,
+            );
+            self.pending.roads = false;
         }
         if self.pending.realms {
             self.realms = generate_realms(
@@ -437,6 +458,7 @@ mod tests {
         }
         if run.settlements {
             run.resources = true;
+            run.roads = true;
         }
         if run.settlements || run.travel {
             run.realms = true;
