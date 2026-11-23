@@ -142,6 +142,7 @@ pub struct WorldGenApp {
     export_decorations: bool,
     export_grids: bool,
     chronicle: crate::chronicle_panel::ChroniclePanel,
+    timelapse: crate::timelapse_panel::TimelapsePanel,
     /// The config last written to the browser address bar.
     linked_config: Option<WorldConfig>,
     /// Finished-map styles; `style` picks one, or `None` for a debug view.
@@ -207,6 +208,7 @@ impl WorldGenApp {
             export_decorations: true,
             export_grids: false,
             chronicle: Default::default(),
+            timelapse: Default::default(),
         }
     }
 
@@ -454,7 +456,10 @@ impl WorldGenApp {
                 self.notice = Some("Link copied to the clipboard.".into());
             }
         });
-        ui.toggle_value(&mut self.chronicle.open, "Chronicle");
+        ui.horizontal(|ui| {
+            ui.toggle_value(&mut self.chronicle.open, "Chronicle");
+            ui.toggle_value(&mut self.timelapse.open, "Time-lapse");
+        });
         egui::CollapsingHeader::new("Export")
             .default_open(false)
             .show(ui, |ui| self.export_controls(ui));
@@ -1635,15 +1640,8 @@ fn link_colour(kind: worldgen_core::roads::LinkKind) -> Rgb {
 
 /// The name of the age years are counted in: a word from the language of
 /// the people with the largest homeland.
-/// The world's name, in the tongue of its largest people.
 fn world_name(world: &World) -> String {
-    world
-        .peoples
-        .peoples
-        .iter()
-        .max_by(|a, b| a.cells.cmp(&b.cells).then(b.id.cmp(&a.id)))
-        .map(|p| p.language.place_name(800_000))
-        .unwrap_or_else(|| "The Known World".to_owned())
+    worldgen_core::chronicle::world_name(world)
 }
 
 fn era_name(world: &World) -> String {
@@ -1732,6 +1730,11 @@ impl eframe::App for WorldGenApp {
         self.realm_window(ctx);
         if self.history_ready() {
             self.chronicle.show(ctx, &self.world, self.timeline.year);
+            if self.era.is_empty() {
+                self.era = era_name(&self.world);
+            }
+            let title = world_name(&self.world);
+            self.timelapse.show(ctx, &self.world, &title, &self.era);
         }
     }
 }

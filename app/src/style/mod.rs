@@ -21,7 +21,7 @@ mod wonders;
 pub use antique::AntiqueStyle;
 pub use borders::realm_colour;
 pub use canvas::Canvas;
-pub use decor::{decorate, Decorations};
+pub use decor::{decorate, ring, subtitle, Decorations};
 pub use text::REGULAR as FELL_REGULAR;
 
 use worldgen_core::history::HistoryState;

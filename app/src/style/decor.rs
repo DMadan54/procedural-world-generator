@@ -220,3 +220,48 @@ fn scale_bar(canvas: &mut Canvas, d: &Decorations, s: f32) {
         Some(PAPER),
     );
 }
+
+/// A vermilion ring around a cell, to flash an event in a time-lapse.
+pub fn ring(canvas: &mut Canvas, cell: u32, width: usize, cell_px: f32) {
+    let c = cell as usize;
+    let [x, y] = [
+        ((c % width) as f32 + 0.5) * cell_px,
+        ((c / width) as f32 + 0.5) * cell_px,
+    ];
+    let s = (canvas.width.min(canvas.height) as f32 / 512.0).max(0.6);
+    for (radius, alpha) in [(14.0 * s, 0.9), (19.0 * s, 0.5)] {
+        let points: Vec<[f32; 2]> = (0..=48)
+            .map(|k| {
+                let a = k as f32 / 48.0 * std::f32::consts::TAU;
+                [x + radius * a.cos(), y + radius * a.sin()]
+            })
+            .collect();
+        canvas.polyline(&points, &vec![1.6 * s; points.len()], VERMILION, alpha);
+    }
+}
+
+/// A line of text centred at the bottom of the map, on a paper band.
+pub fn subtitle(canvas: &mut Canvas, line: &str) {
+    let s = (canvas.width.min(canvas.height) as f32 / 512.0).max(0.6);
+    let size = 9.0 * s;
+    let m = text::measure(line, Face::Italic, size, 0.0);
+    let (w, h) = (canvas.width as f32, canvas.height as f32);
+    let y = h - 46.0 * s;
+    let half = (m.width / 2.0 + 8.0 * s).min(w / 2.0 - 10.0 * s);
+    panel(
+        canvas,
+        [w / 2.0 - half, y - m.ascent - 4.0 * s],
+        [w / 2.0 + half, y + m.descent + 4.0 * s],
+        PAPER,
+    );
+    text::draw(
+        canvas,
+        line,
+        Face::Italic,
+        size,
+        0.0,
+        [w / 2.0 - m.width / 2.0, y],
+        INK,
+        None,
+    );
+}

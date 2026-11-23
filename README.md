@@ -44,6 +44,9 @@ browser.
   with a title cartouche, compass rose and scale bar), or the whole world as
   JSON: peoples, towns, realms, landmarks and the complete event log, ready
   to mine for stories (format in [docs/export-format.md](docs/export-format.md)).
+- **Time-lapse.** Render the history as a GIF (or an MP4 with ffmpeg on the
+  desktop): borders sweep across the land between sampled years, great
+  events pause and flash, and the event feed runs as subtitles.
 - **Debug views for every stage.** Inspect plates, relief, noise, erosion,
   temperature, rainfall, winds, drainage and biomes from the View menu.
 

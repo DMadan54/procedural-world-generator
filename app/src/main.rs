@@ -5,6 +5,8 @@ mod link;
 mod render;
 mod setup;
 mod style;
+mod timelapse;
+mod timelapse_panel;
 mod timeline;
 
 use app::WorldGenApp;

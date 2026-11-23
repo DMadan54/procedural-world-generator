@@ -16,11 +16,16 @@ eframe.workspace = true
 ab_glyph = "0.2"
 # PNG encoding for map export (pure Rust, works on wasm).
 image = { version = "0.25", default-features = false, features = ["png"] }
+# Time-lapse GIFs with one shared palette.
+gif = "0.13"
+color_quant = "1.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 worldgen-core = { workspace = true, features = ["parallel"] }
 # Native save dialogs for exports.
 rfd = "0.15"
+# Renders time-lapse frames in parallel.
+rayon.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen-futures = "0.4"
