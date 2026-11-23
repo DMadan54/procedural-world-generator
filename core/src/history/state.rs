@@ -112,6 +112,18 @@ pub struct SettlementState {
     pub outbreak: Option<u32>,
 }
 
+/// A river that has moved: the map draws `new_course` instead of the old
+/// one from `at` on, and the old bed as an oxbow.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RiverChange {
+    pub year: u32,
+    pub river: u32,
+    pub segment: u32,
+    pub at: u32,
+    pub old_course: Vec<[f32; 2]>,
+    pub new_course: Vec<[f32; 2]>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MigrationRecord {
     pub year: u32,
@@ -177,6 +189,8 @@ pub struct HistoryState {
     pub eruptions: Vec<Eruption>,
     /// Every migration so far, for the arrows on the map.
     pub migrations: Vec<MigrationRecord>,
+    /// Rivers that have moved so far.
+    pub rivers: Vec<RiverChange>,
     /// Per cell: under the Blight.
     pub blight: Vec<bool>,
 }
@@ -245,6 +259,7 @@ impl HistoryState {
             blight: vec![false; realms.width * realms.height],
             eruptions: Vec::new(),
             migrations: Vec::new(),
+            rivers: Vec::new(),
         }
     }
 
@@ -588,7 +603,26 @@ impl HistoryState {
                     name: name.clone(),
                 });
             }
-            EventKind::Earthquake { .. } | EventKind::Drought { .. } => {}
+            EventKind::Earthquake { .. } | EventKind::Drought { .. } | EventKind::Flood { .. } => {}
+            EventKind::RiverAvulsion {
+                river,
+                segment,
+                at,
+                old_course,
+                new_course,
+                ..
+            } => self.rivers.push(RiverChange {
+                year: event.year,
+                river: *river,
+                segment: *segment,
+                at: *at,
+                old_course: old_course.clone(),
+                new_course: new_course.clone(),
+            }),
+            EventKind::SettlementStranded { settlement, .. } => {
+                let s = &mut self.settlements[*settlement as usize];
+                s.hardship_until = s.hardship_until.max(event.year + 30);
+            }
             EventKind::PlagueOutbreak {
                 outbreak,
                 settlement,

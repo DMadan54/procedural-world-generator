@@ -542,6 +542,14 @@ pub fn describe(event: &Event, names: &HistoryState) -> String {
                 .map_or("the wilds", |s| s.name.as_str());
             format!("The rains fail around {near}")
         }
+        EventKind::Flood { name, .. } => format!("The {name} floods its banks"),
+        EventKind::RiverAvulsion { name, .. } => {
+            format!("The {name} breaks its levees and cuts a new course to the sea")
+        }
+        EventKind::SettlementStranded { settlement, .. } => format!(
+            "{} is left on a dry riverbed",
+            settlement_name(names, *settlement)
+        ),
         EventKind::PlagueOutbreak {
             settlement, name, ..
         } => {

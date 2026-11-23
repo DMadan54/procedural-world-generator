@@ -83,6 +83,9 @@ impl HistoryJob {
         for _ in 0..occurrences(&self.ctx.disasters.droughts.clone(), rng) {
             self.drought(year, rng);
         }
+        for _ in 0..occurrences(&self.ctx.disasters.floods.clone(), rng) {
+            self.flood(year, rng);
+        }
         for _ in 0..occurrences(&self.ctx.disasters.plagues.clone(), rng) {
             self.outbreak(year, rng);
         }
@@ -141,7 +144,14 @@ impl HistoryJob {
 
     /// Kills `share` of a settlement. Small places hit hard are abandoned
     /// and become ruins; capitals always hold on. Returns the event index.
-    fn strike(&mut self, year: u32, settlement: u32, share: f32, how: &str, cause: Cause) -> u32 {
+    pub(super) fn strike(
+        &mut self,
+        year: u32,
+        settlement: u32,
+        share: f32,
+        how: &str,
+        cause: Cause,
+    ) -> u32 {
         let st = &self.state.settlements[settlement as usize];
         let deaths = (st.population as f32 * share.clamp(0.0, 0.95)) as u32;
         let left = st.population - deaths;

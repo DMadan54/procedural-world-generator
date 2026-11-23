@@ -163,6 +163,7 @@ impl World {
         let history = HistoryJob::new(&HistoryInputs {
             config,
             tectonics: &tectonics,
+            hydrology: &hydrology,
             biomes: &biomes,
             habitability: &habitability,
             peoples: &peoples,
@@ -427,6 +428,7 @@ impl World {
             self.pending.history = Some(HistoryJob::new(&HistoryInputs {
                 config: &self.config,
                 tectonics: &self.tectonics,
+                hydrology: &self.hydrology,
                 biomes: &self.biomes,
                 habitability: &self.habitability,
                 peoples: &self.peoples,

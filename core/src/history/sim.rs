@@ -16,6 +16,7 @@ use crate::biome::Biomes;
 use crate::config::WorldConfig;
 use crate::config::{DisasterConfig, TradeConfig};
 use crate::habitability::Habitability;
+use crate::hydrology::Hydrology;
 use crate::landmarks::Landmarks;
 use crate::names::Language;
 use crate::peoples::Peoples;
@@ -93,12 +94,18 @@ pub(super) struct Context {
     pub(super) recovered: std::collections::BTreeMap<u32, f32>,
     /// Outbreaks so far.
     pub(super) outbreaks: u32,
+    /// Depression-filled heights, for cutting new river channels.
+    pub(super) filled: Vec<f32>,
+    /// The big rivers' lower courses, and the rivers that have moved.
+    pub(super) trunks: Vec<super::rivers::Trunk>,
+    pub(super) avulsed: Vec<u32>,
 }
 
 /// Everything history is simulated from.
 pub struct HistoryInputs<'a> {
     pub config: &'a WorldConfig,
     pub tectonics: &'a TectonicMap,
+    pub hydrology: &'a Hydrology,
     pub biomes: &'a Biomes,
     pub habitability: &'a Habitability,
     pub peoples: &'a Peoples,
@@ -133,6 +140,7 @@ impl HistoryJob {
         let HistoryInputs {
             config,
             tectonics,
+            hydrology,
             biomes,
             habitability,
             peoples,
@@ -209,6 +217,9 @@ impl HistoryJob {
                 .collect(),
             recovered: Default::default(),
             outbreaks: 0,
+            filled: hydrology.filled.clone(),
+            trunks: super::rivers::trunks(hydrology, &landmarks.river_names),
+            avulsed: Vec::new(),
         };
         let initial = HistoryState::initial(realms, settlements, landmarks);
         let mut job = Self {

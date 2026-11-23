@@ -10,6 +10,7 @@
 mod disasters;
 mod event;
 mod plague;
+mod rivers;
 mod sim;
 mod state;
 mod war;
@@ -19,7 +20,7 @@ pub use event::{Cause, Event, EventKind, Flow, Grievance, PeaceTerms, Ruler};
 pub use sim::{HistoryInputs, HistoryJob};
 pub use state::{
     BattleRecord, Dragon, Eruption, HistoryState, LandmarkState, MigrationRecord, RealmState,
-    Relation, SettlementState, WarState,
+    Relation, RiverChange, SettlementState, WarState,
 };
 
 /// A finished history: the full event log and the snapshots that make

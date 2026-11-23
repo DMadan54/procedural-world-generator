@@ -312,6 +312,28 @@ pub enum EventKind {
         deaths: u32,
         cause: Cause,
     },
+    /// A great flood on a river (`river` indexes `Hydrology::rivers`).
+    Flood {
+        river: u32,
+        name: String,
+        cause: Cause,
+    },
+    /// The river breaks its banks at point `at` of its trunk `segment` and
+    /// cuts a new channel to the sea. Courses are cell coordinates.
+    RiverAvulsion {
+        river: u32,
+        segment: u32,
+        at: u32,
+        name: String,
+        old_course: Vec<[f32; 2]>,
+        new_course: Vec<[f32; 2]>,
+        cause: Cause,
+    },
+    /// A town left on a dry riverbed loses its river trade.
+    SettlementStranded {
+        settlement: u32,
+        cause: Cause,
+    },
     /// A plague breaks out at a port or trade hub. `outbreak` numbers
     /// outbreaks from 0.
     PlagueOutbreak {
@@ -492,7 +514,8 @@ impl EventKind {
             | EventKind::DragonRaid { settlement, .. }
             | EventKind::BlightReachedSettlement { settlement, .. }
             | EventKind::SettlementStruck { settlement, .. }
-            | EventKind::Famine { settlement, .. } => vec![*settlement],
+            | EventKind::Famine { settlement, .. }
+            | EventKind::SettlementStranded { settlement, .. } => vec![*settlement],
             EventKind::Migration { from, to, .. } | EventKind::PlagueSpread { from, to, .. } => {
                 vec![*from, *to]
             }
