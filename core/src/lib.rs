@@ -24,6 +24,7 @@ pub mod habitability;
 pub mod heightmap;
 pub mod history;
 pub mod hydrology;
+pub mod landmarks;
 pub mod names;
 pub mod peoples;
 pub mod realms;

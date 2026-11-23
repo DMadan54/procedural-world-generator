@@ -2,7 +2,7 @@
 //!
 //! Stages: tectonics and noise (independent) → blended heightmap → erosion →
 //! climate → hydrology → biomes → habitability and travel cost → peoples →
-//! settlements → resources → roads → realms → history. Erosion can take seconds, so besides the blocking
+//! settlements → resources → roads → realms → landmarks → history. Erosion can take seconds, so besides the blocking
 //! [`World::generate`] and [`World::update`] there is an incremental path:
 //! [`World::set_config`] runs the cheap stages straight away and queues
 //! erosion and everything after it, and [`World::advance`] does the queued
@@ -17,6 +17,7 @@ use crate::habitability::{generate_habitability, Habitability};
 use crate::heightmap::{blend_heightmap, Heightmap};
 use crate::history::{History, HistoryInputs, HistoryJob};
 use crate::hydrology::{generate_hydrology, Hydrology};
+use crate::landmarks::{generate_landmarks, LandmarkInputs, Landmarks};
 use crate::peoples::{generate_peoples, Peoples};
 use crate::realms::{generate_realms, Realms};
 use crate::resources::{generate_resources, Resources};
@@ -61,6 +62,8 @@ pub struct World {
     pub roads: Roads,
     /// Stage: the political map at year 0.
     pub realms: Realms,
+    /// Stage: dragon dens, elder ruins, leylines, drowned cities, river names.
+    pub landmarks: Landmarks,
     /// Stage: the event log of everything after year 0.
     pub history: History,
     /// Work queued by `set_config` and not yet done by `advance`.
@@ -80,6 +83,7 @@ struct Pending {
     resources: bool,
     roads: bool,
     realms: bool,
+    landmarks: bool,
     /// History must be rebuilt once the stages it reads are up to date.
     history_restart: bool,
     history: Option<HistoryJob>,
@@ -102,6 +106,7 @@ pub struct StagesRun {
     pub resources: bool,
     pub roads: bool,
     pub realms: bool,
+    pub landmarks: bool,
     pub history: bool,
 }
 
@@ -145,6 +150,16 @@ impl World {
         );
         let roads = generate_roads(config, &hydrology, &biomes, &settlements, &travel_cost);
         let realms = generate_realms(config, &biomes, &peoples, &settlements, &travel_cost);
+        let landmarks = generate_landmarks(&LandmarkInputs {
+            config,
+            terrain: &terrain,
+            hydrology: &hydrology,
+            habitability: &habitability,
+            peoples: &peoples,
+            settlements: &settlements,
+            resources: &resources,
+            realms: &realms,
+        });
         let history = HistoryJob::new(&HistoryInputs {
             config,
             biomes: &biomes,
@@ -173,6 +188,7 @@ impl World {
             resources,
             roads,
             realms,
+            landmarks,
             history,
             pending: Pending::default(),
         }
@@ -217,7 +233,10 @@ impl World {
         let resources = settlements || config.resources != old.resources;
         let roads = settlements || travel || config.roads != old.roads;
         let realms = settlements || travel || config.realms != old.realms;
-        let history = realms
+        let landmarks =
+            realms || resources || config.landmarks != old.landmarks || config.magic != old.magic;
+        let history = landmarks
+            || realms
             || resources
             || roads
             || config.trade != old.trade
@@ -240,6 +259,7 @@ impl World {
             resources,
             roads,
             realms,
+            landmarks,
             history,
         };
 
@@ -265,6 +285,7 @@ impl World {
         self.pending.resources |= resources;
         self.pending.roads |= roads;
         self.pending.realms |= realms;
+        self.pending.landmarks |= landmarks;
         if history {
             // Restarted once everything it reads is up to date (in advance).
             self.pending.history = None;
@@ -361,7 +382,7 @@ impl World {
                 &self.settlements,
             );
             self.pending.resources = false;
-            self.pending.history_restart = true;
+            self.pending.landmarks = true;
         }
         if self.pending.roads {
             self.roads = generate_roads(
@@ -383,6 +404,20 @@ impl World {
                 &self.travel_cost,
             );
             self.pending.realms = false;
+            self.pending.landmarks = true;
+        }
+        if self.pending.landmarks {
+            self.landmarks = generate_landmarks(&LandmarkInputs {
+                config: &self.config,
+                terrain: &self.terrain,
+                hydrology: &self.hydrology,
+                habitability: &self.habitability,
+                peoples: &self.peoples,
+                settlements: &self.settlements,
+                resources: &self.resources,
+                realms: &self.realms,
+            });
+            self.pending.landmarks = false;
             self.pending.history_restart = true;
         }
         if self.pending.history_restart {
@@ -474,7 +509,10 @@ mod tests {
         if run.settlements || run.travel {
             run.realms = true;
         }
-        if run.realms || run.resources || run.roads {
+        if run.realms || run.resources {
+            run.landmarks = true;
+        }
+        if run.landmarks || run.roads {
             run.history = true;
         }
         run
@@ -622,11 +660,16 @@ mod tests {
     }
 
     #[test]
-    fn magic_reruns_nothing_and_history_settings_rerun_only_history() {
+    fn magic_reruns_landmarks_and_history_settings_rerun_only_history() {
         let mut world = World::generate(&small(42));
         let mut config = small(42);
         config.magic.level = crate::config::MagicLevel::Saturated;
-        assert_eq!(world.set_config(&config), StagesRun::default());
+        assert_eq!(world.set_config(&config), only(|r| r.landmarks = true));
+        world.finish();
+        assert_eq!(world, World::generate(&config));
+
+        config.landmarks.elder_ruins = 12;
+        assert_eq!(world.set_config(&config), only(|r| r.landmarks = true));
 
         config.history.years = 300;
         config.politics.empire_formation = 0.9;

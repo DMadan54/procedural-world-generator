@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Bump when a change makes existing configs produce different worlds (new
 /// RNG derivation, changed algorithm or defaults), so saved configs can be
 /// detected as coming from an older generator.
-pub const GENERATOR_VERSION: u32 = 11;
+pub const GENERATOR_VERSION: u32 = 12;
 
 pub const MIN_PLATES: usize = 8;
 pub const MAX_PLATES: usize = 40;
@@ -38,6 +38,7 @@ pub struct WorldConfig {
     pub trade: TradeConfig,
     pub realms: RealmConfig,
     pub magic: MagicConfig,
+    pub landmarks: LandmarkConfig,
     pub politics: PoliticsConfig,
     pub disasters: DisasterConfig,
     pub history: HistoryConfig,
@@ -67,6 +68,7 @@ impl Default for WorldConfig {
             trade: TradeConfig::default(),
             realms: RealmConfig::default(),
             magic: MagicConfig::default(),
+            landmarks: LandmarkConfig::default(),
             politics: PoliticsConfig::default(),
             disasters: DisasterConfig::default(),
             history: HistoryConfig::default(),
@@ -92,6 +94,28 @@ pub enum MagicLevel {
 #[serde(default)]
 pub struct MagicConfig {
     pub level: MagicLevel,
+}
+
+/// How many of each landmark a 512×512 map gets (scaled by area; the
+/// magical kinds also by [`MagicLevel`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LandmarkConfig {
+    pub dragon_dens: u32,
+    pub elder_ruins: u32,
+    pub nexuses: u32,
+    pub drowned_cities: u32,
+}
+
+impl Default for LandmarkConfig {
+    fn default() -> Self {
+        Self {
+            dragon_dens: 4,
+            elder_ruins: 6,
+            nexuses: 2,
+            drowned_cities: 3,
+        }
+    }
 }
 
 pub const MAX_REALMS: u32 = 64;
