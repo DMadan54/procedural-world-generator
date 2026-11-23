@@ -18,7 +18,8 @@ browser.
 - **Antique map style.** Parchment, hatched coastlines, inked rivers that
   taper with flow, mountain glyphs along ranges, stippled forests, marsh
   tufts, settlement marks with hand-lettered names in IM Fell, and peoples'
-  names arched across their homelands.
+  names arched across their homelands, and realms washed in hand-applied
+  colour inside dotted frontiers.
 - **Peoples with their own languages.** Every culture names its towns, rulers
   and itself in a generated language, so names from one people sound related.
 - **World setup.** Choose a layout (continents, archipelago, pangaea,
@@ -47,6 +48,7 @@ Each stage reads the outputs of the ones before it and has its own debug view.
 | Habitability | Scores land from its biome, fresh water, sheltered coast, slope and altitude. | Habitability |
 | Peoples | Places cultures on the best land and spreads them over a travel-cost map so homelands end at mountains and seas; each gets traits and its own naming language. | Peoples |
 | Settlements | Places villages, towns, cities and capitals on the best sites, ranks them by population, flags ports, river crossings, passes and oases, and names them in their people's language. | Settlements |
+| Realms | Founds a realm at each capital and grows its territory over the travel-cost map, so borders follow mountains, rivers and straits; each realm takes a government, name, ruling house and arms from its people. | Realms |
 
 The magic, politics, disasters and history settings are saved with each world
 and travel in share links, but no stage uses them yet.

@@ -6,6 +6,7 @@ use worldgen_core::hydrology::{NO_LAKE, NO_SEGMENT};
 use worldgen_core::settlements::NO_SETTLEMENT;
 use worldgen_core::{Biome, World};
 
+use super::borders;
 use super::canvas::{Canvas, Colour};
 use super::lettering;
 use super::util::{bilinear, chaikin, distance_to, hash, mix, value_noise};
@@ -204,6 +205,9 @@ impl MapStyle for AntiqueStyle {
             }
         }
 
+        // Watercolour wash inside each realm's edge, under the ink.
+        borders::wash(&mut canvas, world, s);
+
         // Rivers: smoothed, tapering with discharge.
         let threshold = world.config.hydrology.river_threshold.max(1e-3);
         for segment in &hy.segments {
@@ -231,7 +235,10 @@ impl MapStyle for AntiqueStyle {
             draw_glyph(&mut canvas, glyph, s);
         }
 
+        borders::frontiers(&mut canvas, world, s);
+
         // Lettering last, so it sits on top of the landscape.
+        lettering::draw_realm_names(&mut canvas, world, s);
         lettering::draw_people_names(&mut canvas, world, s);
         lettering::draw_settlements(&mut canvas, world, s);
         lettering::draw_settlement_labels(&mut canvas, world, s);

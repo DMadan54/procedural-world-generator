@@ -51,10 +51,12 @@ enum DebugView {
     Peoples,
     /// Settlements stage: sites by rank over the homelands.
     Settlements,
+    /// Realms stage: the political map at year 0.
+    Realms,
 }
 
 impl DebugView {
-    const ALL: [DebugView; 14] = [
+    const ALL: [DebugView; 15] = [
         DebugView::Terrain,
         DebugView::Plates,
         DebugView::TectonicRelief,
@@ -69,6 +71,7 @@ impl DebugView {
         DebugView::Habitability,
         DebugView::Peoples,
         DebugView::Settlements,
+        DebugView::Realms,
     ];
 
     fn label(self) -> &'static str {
@@ -87,6 +90,7 @@ impl DebugView {
             DebugView::Habitability => "Habitability",
             DebugView::Peoples => "Peoples",
             DebugView::Settlements => "Settlements",
+            DebugView::Realms => "Realms",
         }
     }
 }
@@ -220,6 +224,7 @@ impl WorldGenApp {
             DebugView::Biomes => render::biomes(&self.world.biomes),
             DebugView::Habitability => render::habitability(&self.world),
             DebugView::Peoples | DebugView::Settlements => render::peoples(&self.world),
+            DebugView::Realms => render::realms(&self.world),
         }
     }
 
@@ -434,6 +439,22 @@ impl WorldGenApp {
                     flags(|f| f.oasis)
                 ));
             }
+            Some(DebugView::Realms) => {
+                let r = &self.world.realms;
+                let total: u32 = r.realms.iter().map(|x| x.cells).sum::<u32>().max(1);
+                for realm in &r.realms {
+                    let people = &self.world.peoples.peoples[realm.people as usize];
+                    let label = format!(
+                        "{} ({}, House {}, {:.0}%)",
+                        realm.name,
+                        people.name,
+                        realm.dynasty.house,
+                        100.0 * realm.cells as f32 / total as f32
+                    );
+                    legend_row(ui, render::realm_rgb(realm.colour), &label);
+                }
+                ui.weak("Grey land is unclaimed wilderness.");
+            }
             Some(DebugView::Biomes) => {
                 ui.weak("Share of land");
                 for (biome, share) in self.world.biomes.coverage() {
@@ -615,6 +636,7 @@ impl WorldGenApp {
                 Some(DebugView::Plates) => self.draw_drift_arrows(ui.painter(), rect),
                 Some(DebugView::Peoples) => self.draw_people_names(ui.painter(), rect),
                 Some(DebugView::Settlements) => self.draw_settlement_markers(ui.painter(), rect),
+                Some(DebugView::Realms) => self.draw_capitals(ui.painter(), rect),
                 Some(DebugView::Wind) => self.draw_wind_arrows(ui.painter(), rect),
                 Some(DebugView::Terrain | DebugView::Drainage) if !self.before_erosion => {
                     self.draw_rivers(ui.painter(), rect)
@@ -704,6 +726,26 @@ impl WorldGenApp {
                 ui.weak(capitalised(&flags));
             }
         });
+    }
+
+    /// Each realm's capital with the realm's name.
+    fn draw_capitals(&self, painter: &egui::Painter, rect: Rect) {
+        let s = &self.world.settlements;
+        let scale = rect.width() / s.width.max(1) as f32;
+        for realm in &self.world.realms.realms {
+            let capital = &s.settlements[realm.capital as usize];
+            let [x, y] = capital.position(s.width);
+            let at = rect.min + egui::vec2(x as f32 + 0.5, y as f32 + 0.5) * scale;
+            painter.circle_filled(at, 5.0_f32, Color32::BLACK);
+            painter.circle_filled(at, 3.0_f32, Color32::WHITE);
+            painter.text(
+                at + egui::vec2(0.0, -8.0),
+                egui::Align2::CENTER_BOTTOM,
+                &realm.name,
+                egui::FontId::proportional(13.0),
+                Color32::BLACK,
+            );
+        }
     }
 
     /// Settlements as rank-sized dots; capitals labelled.

@@ -10,9 +10,6 @@ use super::text::{self, Face};
 
 const INK: Colour = [0.24, 0.18, 0.12];
 const PAPER: Colour = [0.93, 0.88, 0.75];
-/// People names in the muted vermilion old maps used for regions: it stays
-/// legible over brown ink and green woods without needing a halo.
-const PEOPLE_INK: Colour = [0.58, 0.2, 0.13];
 
 /// Radius of a settlement's glyph in canvas pixels.
 fn glyph_radius(rank: Rank, s: f32) -> f32 {
@@ -217,8 +214,63 @@ fn water_under(world: &World, rect: &Rect, s: f32) -> f32 {
     }
 }
 
-/// Each sizeable people's name in widely spaced capitals, on a gentle arch
-/// along the main axis of its homeland.
+/// How an arched region name is lettered.
+struct ArchStyle {
+    face: Face,
+    colour: Colour,
+    alpha: f32,
+    /// Size limits in canvas pixels per world-cell scale.
+    min_size: f32,
+    max_size: f32,
+    /// Gap between letters as a fraction of the size.
+    gap_ratio: f32,
+    /// Share of the region's length the name should span.
+    coverage: f32,
+}
+
+/// Realm names: large vermilion capitals, as old maps lettered countries.
+const REALM_ARCH: ArchStyle = ArchStyle {
+    face: Face::Regular,
+    colour: [0.58, 0.2, 0.13],
+    alpha: 0.8,
+    min_size: 8.0,
+    max_size: 17.0,
+    gap_ratio: 0.45,
+    coverage: 0.7,
+};
+
+/// People names: smaller dark italic capitals, for peoples split between
+/// realms (the political map already names the rest).
+const PEOPLE_ARCH: ArchStyle = ArchStyle {
+    face: Face::Italic,
+    colour: [0.3, 0.22, 0.15],
+    alpha: 0.6,
+    min_size: 5.5,
+    max_size: 9.0,
+    gap_ratio: 0.6,
+    coverage: 0.5,
+};
+
+/// Each realm's name arched along its territory's main axis.
+pub fn draw_realm_names(canvas: &mut Canvas, world: &World, s: f32) {
+    let r = &world.realms;
+    let min_cells = (r.width * r.height) as u32 / 400;
+    for realm in &r.realms {
+        if realm.cells >= min_cells {
+            let cells = cells_where(r.width, r.height, |i| r.owner[i] == realm.id);
+            draw_arched(
+                canvas,
+                &cells,
+                &realm.short_name.to_uppercase(),
+                s,
+                &REALM_ARCH,
+            );
+        }
+    }
+}
+
+/// Names of sizeable peoples whose homeland spans two or more realms, placed
+/// over the part outside their main realm's name.
 pub fn draw_people_names(canvas: &mut Canvas, world: &World, s: f32) {
     let p = &world.peoples;
     let (w, h) = (p.width, p.height);
@@ -227,82 +279,99 @@ pub fn draw_people_names(canvas: &mut Canvas, world: &World, s: f32) {
         if people.cells < min_cells {
             continue;
         }
-        // Centroid and principal axis of the homeland.
-        let cells: Vec<[f32; 2]> = (0..w * h)
+        let realms: std::collections::BTreeSet<u16> = (0..w * h)
             .filter(|&i| p.homeland[i] == people.id)
-            .map(|i| [(i % w) as f32 + 0.5, (i / w) as f32 + 0.5])
+            .map(|i| world.realms.owner[i])
+            .filter(|&o| o != worldgen_core::realms::NO_REALM)
             .collect();
-        let n = cells.len() as f32;
-        let (mx, my) = (
-            cells.iter().map(|c| c[0]).sum::<f32>() / n,
-            cells.iter().map(|c| c[1]).sum::<f32>() / n,
+        if realms.len() < 2 {
+            continue;
+        }
+        let cells = cells_where(w, h, |i| p.homeland[i] == people.id);
+        draw_arched(canvas, &cells, &people.name.to_uppercase(), s, &PEOPLE_ARCH);
+    }
+}
+
+fn cells_where(w: usize, h: usize, keep: impl Fn(usize) -> bool) -> Vec<[f32; 2]> {
+    (0..w * h)
+        .filter(|&i| keep(i))
+        .map(|i| [(i % w) as f32 + 0.5, (i / w) as f32 + 0.5])
+        .collect()
+}
+
+/// Letters `name` in spaced capitals on a gentle arch (∩) along the main axis
+/// of a region (its centroid and principal axis from the covariance of its
+/// cells), sized to span part of its length.
+fn draw_arched(canvas: &mut Canvas, cells: &[[f32; 2]], name: &str, s: f32, style: &ArchStyle) {
+    if cells.len() < 2 || name.is_empty() {
+        return;
+    }
+    let n = cells.len() as f32;
+    let (mx, my) = (
+        cells.iter().map(|c| c[0]).sum::<f32>() / n,
+        cells.iter().map(|c| c[1]).sum::<f32>() / n,
+    );
+    let (mut sxx, mut syy, mut sxy) = (0.0, 0.0, 0.0);
+    for c in cells {
+        let (dx, dy) = (c[0] - mx, c[1] - my);
+        sxx += dx * dx;
+        syy += dy * dy;
+        sxy += dx * dy;
+    }
+    // Keep lettering readable: left to right, never steeper than 30°.
+    let limit = 30f32.to_radians();
+    let angle = (0.5 * (2.0 * sxy).atan2(sxx - syy)).clamp(-limit, limit);
+    let (sin, cos) = angle.sin_cos();
+    let mut along: Vec<f32> = cells
+        .iter()
+        .map(|c| (c[0] - mx) * cos + (c[1] - my) * sin)
+        .collect();
+    along.sort_by(|a, b| a.total_cmp(b));
+    let last = along.len() - 1;
+    let span = (along[(last as f32 * 0.95) as usize] - along[(last as f32 * 0.05) as usize]) * s;
+
+    let letters: Vec<char> = name.chars().collect();
+    let unit: f32 = letters
+        .iter()
+        .map(|&c| text::advance(c, style.face, 1.0))
+        .sum();
+    let gaps = letters.len() as f32 - 1.0;
+    let size = (style.coverage * span / (unit + style.gap_ratio * gaps))
+        .clamp(style.min_size * s, style.max_size * s);
+    let gap = style.gap_ratio * size;
+    let total: f32 = letters
+        .iter()
+        .map(|&c| text::advance(c, style.face, size))
+        .sum::<f32>()
+        + gap * gaps;
+
+    // The perpendicular offset grows with the square of the distance from
+    // the middle, giving a shallow arch.
+    let half = total / 2.0;
+    let bow = 0.08 * total;
+    let normal = [-sin, cos];
+    let centre = [mx * s, my * s];
+    let mut t = -half;
+    for &c in &letters {
+        let a = text::advance(c, style.face, size);
+        let mid = t + a / 2.0;
+        let u = mid / half;
+        let offset = bow * u * u;
+        let slope = (2.0 * bow * mid / (half * half)).atan();
+        let at = [
+            centre[0] + cos * mid + normal[0] * offset,
+            centre[1] + sin * mid + normal[1] * offset,
+        ];
+        text::draw_rotated_char(
+            canvas,
+            c,
+            style.face,
+            size,
+            at,
+            angle + slope,
+            style.colour,
+            style.alpha,
         );
-        let (mut sxx, mut syy, mut sxy) = (0.0, 0.0, 0.0);
-        for c in &cells {
-            let (dx, dy) = (c[0] - mx, c[1] - my);
-            sxx += dx * dx;
-            syy += dy * dy;
-            sxy += dx * dy;
-        }
-        let mut angle = 0.5 * (2.0 * sxy).atan2(sxx - syy);
-        // Keep lettering readable: left to right, never steeper than 30°.
-        let limit = 30f32.to_radians();
-        angle = angle.clamp(-limit, limit);
-        let (sin, cos) = angle.sin_cos();
-        let mut along: Vec<f32> = cells
-            .iter()
-            .map(|c| (c[0] - mx) * cos + (c[1] - my) * sin)
-            .collect();
-        along.sort_by(|a, b| a.total_cmp(b));
-        let span = (along[(along.len() as f32 * 0.95) as usize - 1]
-            - along[(along.len() as f32 * 0.05) as usize])
-            * s;
-
-        let name = people.name.to_uppercase();
-        let letters: Vec<char> = name.chars().collect();
-        let unit: f32 = letters
-            .iter()
-            .map(|&c| text::advance(c, Face::Regular, 1.0))
-            .sum();
-        let gap_ratio = 0.45;
-        let length = 0.7 * span;
-        let size =
-            (length / (unit + gap_ratio * (letters.len() as f32 - 1.0))).clamp(8.0 * s, 16.0 * s);
-        let gap = gap_ratio * size;
-        let total: f32 = letters
-            .iter()
-            .map(|&c| text::advance(c, Face::Regular, size))
-            .sum::<f32>()
-            + gap * (letters.len() as f32 - 1.0);
-
-        // Walk along a shallow arch (∩): the perpendicular offset grows with
-        // the square of the distance from the middle.
-        let half = total / 2.0;
-        let bow = 0.08 * total;
-        let normal = [-sin, cos];
-        let centre = [mx * s, my * s];
-        let mut t = -half;
-        for &c in &letters {
-            let a = text::advance(c, Face::Regular, size);
-            let mid = t + a / 2.0;
-            let u = mid / half;
-            let offset = bow * u * u;
-            let slope = (2.0 * bow * mid / (half * half)).atan();
-            let at = [
-                centre[0] + cos * mid + normal[0] * offset,
-                centre[1] + sin * mid + normal[1] * offset,
-            ];
-            text::draw_rotated_char(
-                canvas,
-                c,
-                Face::Regular,
-                size,
-                at,
-                angle + slope,
-                PEOPLE_INK,
-                0.78,
-            );
-            t += a + gap;
-        }
+        t += a + gap;
     }
 }

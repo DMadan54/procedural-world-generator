@@ -8,12 +8,14 @@
 //! [`all_styles`]. It appears in the app's view menu automatically.
 
 mod antique;
+mod borders;
 mod canvas;
 mod lettering;
 mod text;
 mod util;
 
 pub use antique::AntiqueStyle;
+pub use borders::realm_colour;
 pub use canvas::Canvas;
 
 use worldgen_core::World;
