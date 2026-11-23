@@ -10,6 +10,7 @@ use worldgen_core::{Biome, World};
 use super::borders;
 use super::canvas::{Canvas, Colour};
 use super::lettering;
+use super::network;
 use super::util::{bilinear, chaikin, distance_to, hash, mix, value_noise};
 use super::MapStyle;
 
@@ -232,6 +233,8 @@ impl MapStyle for AntiqueStyle {
         for glyph in &glyphs {
             draw_glyph(&mut canvas, glyph, s);
         }
+        network::draw_resources(&mut canvas, world, s);
+        network::draw_network(&mut canvas, world, s);
 
         age(&mut canvas, s);
         canvas

@@ -19,7 +19,8 @@ browser.
   taper with flow, mountain glyphs along ranges, stippled forests, marsh
   tufts, settlement marks with hand-lettered names in IM Fell, and peoples'
   names arched across their homelands, and realms washed in hand-applied
-  colour inside dotted frontiers.
+  colour inside dotted frontiers, with dotted roads, sea lanes with ships
+  and marks for mines, salt pans and grain lands.
 - **Peoples with their own languages.** Every culture names its towns, rulers
   and itself in a generated language, so names from one people sound related.
 - **World setup.** Choose a layout (continents, archipelago, pangaea,
@@ -51,8 +52,10 @@ Each stage reads the outputs of the ones before it and has its own debug view.
 | Habitability | Scores land from its biome, fresh water, sheltered coast, slope and altitude. | Habitability |
 | Peoples | Places cultures on the best land and spreads them over a travel-cost map so homelands end at mountains and seas; each gets traits and its own naming language. | Peoples |
 | Settlements | Places villages, towns, cities and capitals on the best sites, ranks them by population, flags ports, river crossings, passes and oases, and names them in their people's language. | Settlements |
+| Resources | Places ore and gems along colliding plates and in high ground, timber in forests, grain on fertile river land and salt on arid coasts and dry lake shores, and works out what each settlement produces. | Resources |
+| Roads | Joins settlements with roads found by A* over the travel-cost map (later roads join earlier ones), links towns along navigable rivers and ports by sea lanes. | Roads and sea lanes |
 | Realms | Founds a realm at each capital and grows its territory over the travel-cost map, so borders follow mountains, rivers and straits; each realm takes a government, name, ruling house and arms from its people. | Realms |
-| History | Simulates centuries as an append-only event log: rulers die and are succeeded, frontiers shift, strong realms conquer weak ones and large ones break apart, towns grow, dwindle, are founded and renamed. Every event records its cause; snapshots make any year instant to show. | Realms by year, event feed |
+| History | Simulates centuries as an append-only event log: rulers die and are succeeded, frontiers shift, goods are traded along the network (realms grow rich on tolls), strong realms conquer weak ones and large ones break apart, towns grow, dwindle, are founded and renamed. Every event records its cause; snapshots make any year instant to show. | Realms by year, event feed |
 
 Politics and history settings drive the realm and history stages. Magic and
 disaster settings travel with each world but no stage uses them yet.

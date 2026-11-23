@@ -343,7 +343,7 @@ impl SetupPanel {
             );
         });
         ui.add_space(4.0);
-        ui.weak("Magic, politics, disasters and history are saved with the world for stages still to come; they don't change the map yet.");
+        ui.weak("Politics and history shape the realms and their story. Magic and disasters are saved with the world for stages still to come.");
     }
 }
 

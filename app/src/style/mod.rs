@@ -11,6 +11,7 @@ mod antique;
 mod borders;
 mod canvas;
 mod lettering;
+mod network;
 mod text;
 mod util;
 

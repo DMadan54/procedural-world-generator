@@ -58,10 +58,16 @@ enum DebugView {
     Realms,
     /// History stage: realms at the slider year.
     HistoryRealms,
+    /// Resources stage: deposits.
+    Resources,
+    /// Roads stage: roads, river links and sea lanes.
+    Network,
+    /// History stage: trade flows at the slider year.
+    Trade,
 }
 
 impl DebugView {
-    const ALL: [DebugView; 16] = [
+    const ALL: [DebugView; 19] = [
         DebugView::Terrain,
         DebugView::Plates,
         DebugView::TectonicRelief,
@@ -78,6 +84,9 @@ impl DebugView {
         DebugView::Settlements,
         DebugView::Realms,
         DebugView::HistoryRealms,
+        DebugView::Resources,
+        DebugView::Network,
+        DebugView::Trade,
     ];
 
     fn label(self) -> &'static str {
@@ -98,6 +107,9 @@ impl DebugView {
             DebugView::Settlements => "Settlements",
             DebugView::Realms => "Realms",
             DebugView::HistoryRealms => "Realms by year",
+            DebugView::Resources => "Resources",
+            DebugView::Network => "Roads and sea lanes",
+            DebugView::Trade => "Trade by year",
         }
     }
 }
@@ -193,6 +205,9 @@ impl WorldGenApp {
     /// from the nearest snapshot. While history is being re-simulated, shows
     /// the world as it stands at year 0.
     fn ensure_state(&mut self) {
+        if self.era.is_empty() {
+            self.era = era_name(&self.world);
+        }
         if !self.history_ready() {
             if self
                 .state
@@ -309,6 +324,9 @@ impl WorldGenApp {
             DebugView::Peoples | DebugView::Settlements => render::peoples(&self.world),
             DebugView::Realms => render::realms(&self.world),
             DebugView::HistoryRealms => render::realms_at(&self.world, state),
+            DebugView::Resources | DebugView::Network | DebugView::Trade => {
+                render::wind_background(map, sea)
+            }
         }
     }
 
@@ -539,6 +557,63 @@ impl WorldGenApp {
                 }
                 ui.weak("Grey land is unclaimed wilderness.");
             }
+            Some(DebugView::Resources) => {
+                for r in worldgen_core::resources::Resource::ALL {
+                    let n = self
+                        .world
+                        .resources
+                        .deposits
+                        .iter()
+                        .filter(|d| d.resource == r)
+                        .count();
+                    legend_row(
+                        ui,
+                        resource_colour(r),
+                        &format!("{} ({n} deposits)", r.name()),
+                    );
+                }
+            }
+            Some(DebugView::Network) => {
+                use worldgen_core::roads::LinkKind;
+                for (kind, label) in [
+                    (LinkKind::Road, "Roads"),
+                    (LinkKind::River, "River links"),
+                    (LinkKind::Sea, "Sea lanes"),
+                ] {
+                    let n = self
+                        .world
+                        .roads
+                        .links
+                        .iter()
+                        .filter(|l| l.kind == kind)
+                        .count();
+                    legend_row(ui, link_colour(kind), &format!("{label}: {n}"));
+                }
+            }
+            Some(DebugView::Trade) => {
+                if let Some(state) = &self.state {
+                    for r in worldgen_core::resources::Resource::ALL {
+                        let total: f32 = state
+                            .trade
+                            .iter()
+                            .filter(|f| f.resource == r)
+                            .map(|f| f.received)
+                            .sum();
+                        legend_row(
+                            ui,
+                            resource_colour(r),
+                            &format!("{} delivered: {total:.0}", r.name()),
+                        );
+                    }
+                    let mut rich: Vec<_> = state.living_realms().collect();
+                    rich.sort_by(|a, b| b.1.wealth.total_cmp(&a.1.wealth));
+                    ui.add_space(6.0);
+                    ui.weak("Richest realms");
+                    for (_, realm) in rich.iter().take(5) {
+                        ui.label(format!("{} — {:.0}", realm.name, realm.wealth));
+                    }
+                }
+            }
             Some(DebugView::Biomes) => {
                 ui.weak("Share of land");
                 for (biome, share) in self.world.biomes.coverage() {
@@ -721,6 +796,9 @@ impl WorldGenApp {
                 Some(DebugView::Peoples) => self.draw_people_names(ui.painter(), rect),
                 Some(DebugView::Settlements) => self.draw_settlement_markers(ui.painter(), rect),
                 Some(DebugView::Realms) => self.draw_capitals(ui.painter(), rect),
+                Some(DebugView::Resources) => self.draw_deposits(ui.painter(), rect),
+                Some(DebugView::Network) => self.draw_network(ui.painter(), rect),
+                Some(DebugView::Trade) => self.draw_trade(ui.painter(), rect),
                 Some(DebugView::Wind) => self.draw_wind_arrows(ui.painter(), rect),
                 Some(DebugView::Terrain | DebugView::Drainage) if !self.before_erosion => {
                     self.draw_rivers(ui.painter(), rect)
@@ -822,6 +900,65 @@ impl WorldGenApp {
                 ui.weak(capitalised(&flags));
             }
         });
+    }
+
+    fn to_screen(&self, rect: Rect, cell: u32) -> egui::Pos2 {
+        let w = self.world.terrain.width.max(1);
+        let scale = rect.width() / w as f32;
+        rect.min
+            + egui::vec2(
+                (cell as usize % w) as f32 + 0.5,
+                (cell as usize / w) as f32 + 0.5,
+            ) * scale
+    }
+
+    fn draw_deposits(&self, painter: &egui::Painter, rect: Rect) {
+        for d in &self.world.resources.deposits {
+            let [r, g, b] = resource_colour(d.resource);
+            let at = self.to_screen(rect, d.cell);
+            painter.circle_filled(at, 2.0 + 3.0 * d.richness, Color32::from_rgb(r, g, b));
+            painter.circle_stroke(
+                at,
+                2.0 + 3.0 * d.richness,
+                Stroke::new(1.0_f32, Color32::BLACK),
+            );
+        }
+    }
+
+    fn draw_network(&self, painter: &egui::Painter, rect: Rect) {
+        for link in &self.world.roads.links {
+            let [r, g, b] = link_colour(link.kind);
+            let points: Vec<egui::Pos2> = link
+                .cells
+                .iter()
+                .map(|&c| self.to_screen(rect, c))
+                .collect();
+            painter.add(egui::Shape::line(
+                points,
+                Stroke::new(1.6_f32, Color32::from_rgb(r, g, b)),
+            ));
+        }
+        self.draw_settlement_markers(painter, rect);
+    }
+
+    fn draw_trade(&self, painter: &egui::Painter, rect: Rect) {
+        let Some(state) = &self.state else {
+            return;
+        };
+        for flow in &state.trade {
+            let (Some(a), Some(b)) = (
+                state.settlements.get(flow.from as usize),
+                state.settlements.get(flow.to as usize),
+            ) else {
+                continue;
+            };
+            let [r, g, bl] = resource_colour(flow.resource);
+            let width = (0.6 + flow.received.sqrt() * 0.6).min(8.0);
+            painter.line_segment(
+                [self.to_screen(rect, a.cell), self.to_screen(rect, b.cell)],
+                Stroke::new(width, Color32::from_rgba_unmultiplied(r, g, bl, 200)),
+            );
+        }
     }
 
     /// Each realm's capital with the realm's name.
@@ -1027,6 +1164,26 @@ fn capitalised(text: &str) -> String {
         .unwrap_or_default()
 }
 
+fn resource_colour(r: worldgen_core::resources::Resource) -> Rgb {
+    use worldgen_core::resources::Resource;
+    match r {
+        Resource::Ore => [120, 120, 135],
+        Resource::Timber => [40, 120, 50],
+        Resource::Grain => [230, 190, 60],
+        Resource::Salt => [240, 240, 240],
+        Resource::Gems => [190, 60, 200],
+    }
+}
+
+fn link_colour(kind: worldgen_core::roads::LinkKind) -> Rgb {
+    use worldgen_core::roads::LinkKind;
+    match kind {
+        LinkKind::Road => [150, 90, 40],
+        LinkKind::River => [40, 110, 200],
+        LinkKind::Sea => [20, 60, 140],
+    }
+}
+
 /// The name of the age years are counted in: a word from the language of
 /// the people with the largest homeland.
 fn era_name(world: &World) -> String {
@@ -1100,7 +1257,8 @@ impl eframe::App for WorldGenApp {
                 year_changed |= self.timeline.show_feed(ctx, &self.world.history, names);
             }
         }
-        if year_changed && (self.style.is_some() || self.view == DebugView::HistoryRealms) {
+        let yearly = matches!(self.view, DebugView::HistoryRealms | DebugView::Trade);
+        if year_changed && (self.style.is_some() || yearly) {
             self.texture_dirty = true;
         }
         self.central_panel(ctx);
