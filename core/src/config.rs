@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Bump when a change makes existing configs produce different worlds (new
 /// RNG derivation, changed algorithm or defaults), so saved configs can be
 /// detected as coming from an older generator.
-pub const GENERATOR_VERSION: u32 = 6;
+pub const GENERATOR_VERSION: u32 = 7;
 
 pub const MIN_PLATES: usize = 8;
 pub const MAX_PLATES: usize = 40;
@@ -33,6 +33,7 @@ pub struct WorldConfig {
     pub travel: TravelConfig,
     pub peoples: PeoplesConfig,
     pub settlements: SettlementConfig,
+    pub realms: RealmConfig,
     pub magic: MagicConfig,
     pub politics: PoliticsConfig,
     pub disasters: DisasterConfig,
@@ -58,6 +59,7 @@ impl Default for WorldConfig {
             travel: TravelConfig::default(),
             peoples: PeoplesConfig::default(),
             settlements: SettlementConfig::default(),
+            realms: RealmConfig::default(),
             magic: MagicConfig::default(),
             politics: PoliticsConfig::default(),
             disasters: DisasterConfig::default(),
@@ -189,6 +191,21 @@ impl Default for TerrainConfig {
 }
 
 pub const MAX_DROPLETS: u32 = 1_000_000;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RealmConfig {
+    /// How far (in travel cost, see `TravelConfig`) a realm's authority
+    /// reaches from its capital at year 0. Land beyond every realm stays
+    /// wild.
+    pub max_reach: f32,
+}
+
+impl Default for RealmConfig {
+    fn default() -> Self {
+        Self { max_reach: 140.0 }
+    }
+}
 
 /// Settlement placement and ranking. Distances are in cells of a 512-wide
 /// map and scale with world size; the target count scales with area.

@@ -12,7 +12,7 @@
 //!
 //! Pipeline: tectonics and noise (independent) → blended heightmap → erosion
 //! → climate → hydrology → biomes → habitability and travel cost → peoples
-//! → settlements.
+//! → settlements → realms.
 
 pub mod biome;
 pub mod climate;
@@ -25,6 +25,7 @@ pub mod heightmap;
 pub mod hydrology;
 pub mod names;
 pub mod peoples;
+pub mod realms;
 pub mod rng;
 pub mod settlements;
 pub mod share;

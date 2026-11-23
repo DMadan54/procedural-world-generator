@@ -25,6 +25,7 @@ pub mod stage {
     pub const PEOPLES: &str = "peoples";
     pub const PEOPLE_TRAITS: &str = "peoples.traits";
     pub const SETTLEMENTS: &str = "settlements";
+    pub const REALM_HERALDRY: &str = "realms.heraldry";
     pub const NAMES_PEOPLE: &str = "names.people";
     pub const NAMES_PLACE: &str = "names.place";
     pub const NAMES_PERSON: &str = "names.person";

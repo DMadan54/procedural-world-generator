@@ -2,7 +2,7 @@
 //!
 //! Stages: tectonics and noise (independent) → blended heightmap → erosion →
 //! climate → hydrology → biomes → habitability and travel cost → peoples →
-//! settlements. Erosion can take seconds, so besides the blocking
+//! settlements → realms. Erosion can take seconds, so besides the blocking
 //! [`World::generate`] and [`World::update`] there is an incremental path:
 //! [`World::set_config`] runs the cheap stages straight away and queues
 //! erosion and everything after it, and [`World::advance`] does the queued
@@ -17,6 +17,7 @@ use crate::habitability::{generate_habitability, Habitability};
 use crate::heightmap::{blend_heightmap, Heightmap};
 use crate::hydrology::{generate_hydrology, Hydrology};
 use crate::peoples::{generate_peoples, Peoples};
+use crate::realms::{generate_realms, Realms};
 use crate::settlements::{generate_settlements, SettlementInputs, Settlements};
 use crate::tectonics::{generate_tectonics, TectonicMap};
 use crate::travel::travel_cost_grid;
@@ -48,6 +49,8 @@ pub struct World {
     pub peoples: Peoples,
     /// Stage: villages, towns, cities and capitals.
     pub settlements: Settlements,
+    /// Stage: the political map at year 0.
+    pub realms: Realms,
     /// Work queued by `set_config` and not yet done by `advance`.
     pending: Pending,
 }
@@ -62,6 +65,7 @@ struct Pending {
     travel: bool,
     peoples: bool,
     settlements: bool,
+    realms: bool,
 }
 
 /// Which stages a config change re-ran or queued.
@@ -78,6 +82,7 @@ pub struct StagesRun {
     pub travel: bool,
     pub peoples: bool,
     pub settlements: bool,
+    pub realms: bool,
 }
 
 impl World {
@@ -108,6 +113,7 @@ impl World {
             habitability: &habitability,
             peoples: &peoples,
         });
+        let realms = generate_realms(config, &biomes, &peoples, &settlements, &travel_cost);
         Self {
             config: config.clone(),
             tectonics,
@@ -121,6 +127,7 @@ impl World {
             travel_cost,
             peoples,
             settlements,
+            realms,
             pending: Pending::default(),
         }
     }
@@ -161,6 +168,7 @@ impl World {
         let settlements = peoples
             || config.settlements != old.settlements
             || config.politics.target_realms != old.politics.target_realms;
+        let realms = settlements || travel || config.realms != old.realms;
         let run = StagesRun {
             tectonics,
             noise,
@@ -173,6 +181,7 @@ impl World {
             travel,
             peoples,
             settlements,
+            realms,
         };
 
         if tectonics {
@@ -194,6 +203,7 @@ impl World {
         self.pending.travel |= travel;
         self.pending.peoples |= peoples;
         self.pending.settlements |= settlements;
+        self.pending.realms |= realms;
         self.config = config.clone();
         // Without erosion to wait for, the rest is quick: do it now.
         if self.pending.erosion.is_none() {
@@ -267,6 +277,17 @@ impl World {
                 peoples: &self.peoples,
             });
             self.pending.settlements = false;
+            self.pending.realms = true;
+        }
+        if self.pending.realms {
+            self.realms = generate_realms(
+                &self.config,
+                &self.biomes,
+                &self.peoples,
+                &self.settlements,
+                &self.travel_cost,
+            );
+            self.pending.realms = false;
         }
         true
     }
@@ -316,6 +337,9 @@ mod tests {
         }
         if run.peoples {
             run.settlements = true;
+        }
+        if run.settlements || run.travel {
+            run.realms = true;
         }
         run
     }
@@ -437,6 +461,15 @@ mod tests {
             assert_eq!(world.set_config(&config), only(|r| r.settlements = true));
             assert_eq!(world, World::generate(&config));
         }
+    }
+
+    #[test]
+    fn changing_realm_settings_reruns_only_realms() {
+        let mut world = World::generate(&small(42));
+        let mut config = small(42);
+        config.realms.max_reach = 60.0;
+        assert_eq!(world.set_config(&config), only(|r| r.realms = true));
+        assert_eq!(world, World::generate(&config));
     }
 
     #[test]

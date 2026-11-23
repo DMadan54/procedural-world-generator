@@ -124,7 +124,10 @@ pub fn generate_settlements(input: &SettlementInputs) -> Settlements {
     let p = &input.config.settlements;
     let reference = w as f32 / 512.0;
     let area_scale = (w * h) as f32 / (512.0 * 512.0);
-    let target = ((p.target_count as f32 * area_scale).round() as usize).max(1);
+    // Small worlds still need enough settlements to found every realm.
+    let target = ((p.target_count as f32 * area_scale).round() as usize)
+        .max(2 * input.config.politics.target_realms as usize)
+        .max(1);
 
     // Candidate sites, best first; ties by cell index.
     let score = |i: usize| -> f32 {
@@ -503,8 +506,8 @@ mod tests {
     fn settlement_settings_leave_earlier_stages_alone() {
         let base = World::generate(&small(42));
         let mut config = small(42);
-        config.settlements.target_count = 40;
-        config.settlements.min_spacing = 14.0;
+        config.settlements.min_spacing = 30.0;
+        config.settlements.fertile_spacing_factor = 0.0;
         let changed = World::generate(&config);
         assert_eq!(base.peoples, changed.peoples);
         assert_eq!(base.habitability, changed.habitability);
