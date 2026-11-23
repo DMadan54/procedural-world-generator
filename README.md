@@ -16,8 +16,11 @@ browser.
 - **Physically motivated pipeline.** Plates collide to raise mountains, rain
   falls on windward slopes, rivers carve their way to the sea.
 - **Antique map style.** Parchment, hatched coastlines, inked rivers that
-  taper with flow, mountain glyphs along ranges, stippled forests and marsh
-  tufts.
+  taper with flow, mountain glyphs along ranges, stippled forests, marsh
+  tufts, settlement marks with hand-lettered names in IM Fell, and peoples'
+  names arched across their homelands.
+- **Peoples with their own languages.** Every culture names its towns, rulers
+  and itself in a generated language, so names from one people sound related.
 - **World setup.** Choose a layout (continents, archipelago, pangaea,
   islands), sea level, mountain density, climate band, world size, and story
   settings for magic, politics, disasters and history. Start from one of four
@@ -41,6 +44,9 @@ Each stage reads the outputs of the ones before it and has its own debug view.
 | Climate | Temperature from latitude and altitude; prevailing winds in three bands; rain carried downwind and dropped on slopes, leaving rain shadows behind ranges. | Temperature, Precipitation, Prevailing winds |
 | Hydrology | Fills depressions into lakes, routes water downhill and traces rivers as connected polylines with discharge, ready for later stages to query. | Drainage |
 | Biomes | Classifies each cell from its climate and elevation (ice, tundra, alpine, forests, grassland, desert, savanna and more) with noise-ragged borders, adds wetlands and mangroves on flat wet ground, and smooths away speckle. | Biomes, with coverage and a Whittaker diagram |
+| Habitability | Scores land from its biome, fresh water, sheltered coast, slope and altitude. | Habitability |
+| Peoples | Places cultures on the best land and spreads them over a travel-cost map so homelands end at mountains and seas; each gets traits and its own naming language. | Peoples |
+| Settlements | Places villages, towns, cities and capitals on the best sites, ranks them by population, flags ports, river crossings, passes and oases, and names them in their people's language. | Settlements |
 
 The magic, politics, disasters and history settings are saved with each world
 and travel in share links, but no stage uses them yet.
@@ -94,7 +100,8 @@ core/   worldgen-core: all generation logic, no UI dependencies
   src/tectonics.rs, fractal.rs, heightmap.rs, erosion.rs,
   src/climate.rs, hydrology.rs, biome.rs   one file per stage
 app/    worldgen-app: the eframe UI (desktop and web)
-  src/style/         map styles (MapStyle trait, antique style)
+  src/style/         map styles (MapStyle trait, antique style, lettering)
+  assets/fonts/      IM Fell English (SIL Open Font License)
   src/setup.rs       world setup window and presets
   src/link.rs        share links
   presets/           preset configs as JSON

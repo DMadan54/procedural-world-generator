@@ -9,6 +9,8 @@
 
 mod antique;
 mod canvas;
+mod lettering;
+mod text;
 mod util;
 
 pub use antique::AntiqueStyle;

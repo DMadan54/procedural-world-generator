@@ -3,9 +3,11 @@
 
 use worldgen_core::climate::elevation_m;
 use worldgen_core::hydrology::{NO_LAKE, NO_SEGMENT};
+use worldgen_core::settlements::NO_SETTLEMENT;
 use worldgen_core::{Biome, World};
 
 use super::canvas::{Canvas, Colour};
+use super::lettering;
 use super::util::{bilinear, chaikin, distance_to, hash, mix, value_noise};
 use super::MapStyle;
 
@@ -229,6 +231,11 @@ impl MapStyle for AntiqueStyle {
             draw_glyph(&mut canvas, glyph, s);
         }
 
+        // Lettering last, so it sits on top of the landscape.
+        lettering::draw_people_names(&mut canvas, world, s);
+        lettering::draw_settlements(&mut canvas, world, s);
+        lettering::draw_settlement_labels(&mut canvas, world, s);
+
         age(&mut canvas, s);
         frame(&mut canvas, s);
         canvas
@@ -290,6 +297,12 @@ impl AntiqueStyle {
                 if dir[0] < 0.0 {
                     dir = [-dir[0], -dir[1]];
                 }
+                // Glyphs are drawn in profile: a base tilted more than ~30°
+                // collapses into a spike, so flatten steep ridges.
+                if dir[0] < 0.85 {
+                    let y = dir[1].signum() * (1.0 - 0.85f32 * 0.85).sqrt();
+                    dir = [0.85, y];
+                }
                 let t = ((elevation - MOUNTAIN_MIN_M) / (tc.max_elevation_m - MOUNTAIN_MIN_M))
                     .clamp(0.0, 1.0);
                 let height = (4.5 + 9.0 * t.sqrt()) * s;
@@ -314,11 +327,14 @@ impl AntiqueStyle {
                 let i = y * mw + x;
                 let biome = world.biomes.biome[i];
                 // Keep clear of river lines; a third of cells keeps it airy.
-                if !biome.is_wetland() || world.hydrology.segment_id[i] != NO_SEGMENT {
+                if !biome.is_wetland()
+                    || world.hydrology.segment_id[i] != NO_SEGMENT
+                    || world.settlements.at_cell[i] != NO_SETTLEMENT
+                {
                     continue;
                 }
                 let (xi, yi) = (x as i32, y as i32);
-                if hash(xi, yi, 26) > 0.35 {
+                if hash(xi, yi, 26) > 0.18 {
                     continue;
                 }
                 let jx = x as f32 + 0.5 + (hash(xi, yi, 27) - 0.5) * 0.8;
@@ -382,8 +398,20 @@ impl AntiqueStyle {
     }
 }
 
+/// True near water, a river line or a settlement: places a landscape glyph
+/// shouldn't cover.
 fn near_water_or_river(world: &World, x: usize, y: usize) -> bool {
     let (w, h) = (world.terrain.width, world.terrain.height);
+    for dy in -2isize..=2 {
+        for dx in -2isize..=2 {
+            let (Some(nx), Some(ny)) = (x.checked_add_signed(dx), y.checked_add_signed(dy)) else {
+                continue;
+            };
+            if nx < w && ny < h && world.settlements.at_cell[ny * w + nx] != NO_SETTLEMENT {
+                return true;
+            }
+        }
+    }
     for dy in -1isize..=1 {
         for dx in -1isize..=1 {
             let (Some(nx), Some(ny)) = (x.checked_add_signed(dx), y.checked_add_signed(dy)) else {
@@ -477,13 +505,13 @@ fn draw_glyph(canvas: &mut Canvas, glyph: &Glyph, s: f32) {
                         0.9,
                     );
                 }
-                canvas.dot([x, y - 1.0 * k], 1.0 * k, INK, 0.9);
+                canvas.dot([x, y - 1.0 * k], 1.0 * k, INK, 0.7);
                 canvas.dot([x, y - 1.0 * k], 0.6 * k, FOREST_FILL, 1.0);
             } else {
                 // A grass tuft fanning up from one point.
                 let base = [x, y + 0.5 * k];
                 for (dx, dy) in [(-1.0, -0.9), (-0.4, -1.5), (0.2, -1.6), (0.8, -1.1)] {
-                    canvas.line(base, [x + dx * k, y + dy * k], 0.28 * k, INK, 0.9);
+                    canvas.line(base, [x + dx * k, y + dy * k], 0.25 * k, INK, 0.65);
                 }
             }
         }

@@ -345,6 +345,7 @@ impl WorldGenApp {
         };
         egui::ComboBox::from_id_salt("view")
             .width(ui.available_width())
+            .height(600.0)
             .selected_text(selected)
             .show_ui(ui, |ui| {
                 for (i, style) in self.styles.iter().enumerate() {
@@ -599,6 +600,10 @@ impl WorldGenApp {
             let scale = (panel.width() / w).min(panel.height() / h);
             let rect = Rect::from_center_size(panel.center(), egui::vec2(w * scale, h * scale));
             egui::Image::new(texture).paint_at(ui, rect);
+            let response = ui.allocate_rect(rect, egui::Sense::hover());
+            if let Some(pointer) = response.hover_pos() {
+                self.settlement_tooltip(&response, rect, pointer);
+            }
 
             let debug_view = if self.style.is_none() {
                 Some(self.view)
@@ -657,6 +662,50 @@ impl WorldGenApp {
 }
 
 impl WorldGenApp {
+    /// When the pointer is over (or right next to) a settlement, shows its
+    /// name, rank, people, population and features.
+    fn settlement_tooltip(&self, response: &egui::Response, rect: Rect, pointer: egui::Pos2) {
+        let s = &self.world.settlements;
+        if s.width == 0 {
+            return;
+        }
+        let cell = rect.width() / s.width as f32;
+        let (wx, wy) = (
+            (pointer.x - rect.left()) / cell,
+            (pointer.y - rect.top()) / cell,
+        );
+        // Within about 4 screen pixels or 1.5 cells, whichever is larger.
+        let reach = (4.0 / cell).max(1.5);
+        let nearest = s
+            .settlements
+            .iter()
+            .map(|st| {
+                let [x, y] = st.position(s.width);
+                let (dx, dy) = (x as f32 + 0.5 - wx, y as f32 + 0.5 - wy);
+                (dx * dx + dy * dy, st)
+            })
+            .filter(|(d2, _)| *d2 <= reach * reach)
+            .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.id.cmp(&b.1.id)));
+        let Some((_, settlement)) = nearest else {
+            return;
+        };
+        let people = &self.world.peoples.peoples[settlement.people as usize];
+        response.clone().on_hover_ui_at_pointer(|ui| {
+            ui.strong(&settlement.name);
+            ui.label(format!(
+                "{} of the {} ({})",
+                capitalised(settlement.rank.name()),
+                people.name,
+                people.trait_.name()
+            ));
+            ui.label(format!("Population {}", settlement.population));
+            let flags = settlement.flags.describe();
+            if !flags.is_empty() {
+                ui.weak(capitalised(&flags));
+            }
+        });
+    }
+
     /// Settlements as rank-sized dots; capitals labelled.
     fn draw_settlement_markers(&self, painter: &egui::Painter, rect: Rect) {
         use worldgen_core::settlements::Rank;
@@ -830,6 +879,14 @@ fn whittaker_diagram(ui: &mut egui::Ui, world: &World) {
         small,
         text,
     );
+}
+
+fn capitalised(text: &str) -> String {
+    let mut chars = text.chars();
+    chars
+        .next()
+        .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
+        .unwrap_or_default()
 }
 
 /// A small label in the top-left corner of the map.
