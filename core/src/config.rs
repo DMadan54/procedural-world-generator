@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Bump when a change makes existing configs produce different worlds (new
 /// RNG derivation, changed algorithm or defaults), so saved configs can be
 /// detected as coming from an older generator.
-pub const GENERATOR_VERSION: u32 = 10;
+pub const GENERATOR_VERSION: u32 = 11;
 
 pub const MIN_PLATES: usize = 8;
 pub const MAX_PLATES: usize = 40;
@@ -35,6 +35,7 @@ pub struct WorldConfig {
     pub settlements: SettlementConfig,
     pub resources: ResourceConfig,
     pub roads: RoadConfig,
+    pub trade: TradeConfig,
     pub realms: RealmConfig,
     pub magic: MagicConfig,
     pub politics: PoliticsConfig,
@@ -63,6 +64,7 @@ impl Default for WorldConfig {
             settlements: SettlementConfig::default(),
             resources: ResourceConfig::default(),
             roads: RoadConfig::default(),
+            trade: TradeConfig::default(),
             realms: RealmConfig::default(),
             magic: MagicConfig::default(),
             politics: PoliticsConfig::default(),
@@ -201,6 +203,31 @@ impl Default for TerrainConfig {
 }
 
 pub const MAX_DROPLETS: u32 = 1_000_000;
+
+/// Trade during history.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TradeConfig {
+    /// Years between trade seasons.
+    pub interval: u32,
+    /// Share of goods passing through a realm it keeps as toll value.
+    pub toll_rate: f32,
+    /// Share of a shipment lost per unit of route cost (capped at half).
+    pub loss_per_cost: f32,
+    /// Goods per season through a settlement that make it a trade hub.
+    pub hub_threshold: f32,
+}
+
+impl Default for TradeConfig {
+    fn default() -> Self {
+        Self {
+            interval: 5,
+            toll_rate: 0.05,
+            loss_per_cost: 0.002,
+            hub_threshold: 25.0,
+        }
+    }
+}
 
 /// Roads, river links and sea lanes. Distances are in cells of a 512-wide
 /// map; costs are in travel-cost units (see `TravelConfig`).

@@ -9,16 +9,19 @@
 use rand_chacha::rand_core::RngCore;
 use rand_chacha::ChaCha8Rng;
 
-use super::event::{Cause, Event, EventKind, Ruler};
+use super::event::{Cause, Event, EventKind, Flow, Ruler};
 use super::state::HistoryState;
 use super::History;
 use crate::biome::Biomes;
+use crate::config::TradeConfig;
 use crate::config::WorldConfig;
 use crate::habitability::Habitability;
 use crate::names::Language;
 use crate::peoples::Peoples;
 use crate::realms::{Government, Realms, NO_REALM, PALETTE_SIZE};
+use crate::resources::{deposit_output, farming_yield, Deposit, Goods, Resource, Resources};
 use crate::rng::{entity_rng, stage, unit_f32};
+use crate::roads::Roads;
 use crate::settlements::{Rank, Settlements};
 
 /// What the simulation needs to know about the world, copied in so the job
@@ -45,6 +48,29 @@ struct Context {
     spacing: f32,
     empire_formation: f32,
     fragmentation: f32,
+    /// Per settlement: yearly output from deposits, and grain per 1000
+    /// people from farmland. Extended as settlements are founded.
+    output: Vec<Goods>,
+    farming: Vec<f32>,
+    deposits: Vec<Deposit>,
+    catchment: f32,
+    /// The year-0 transport network (settlements founded later aren't on it).
+    roads: Roads,
+    trade: TradeConfig,
+    /// Settlements currently short of grain, so shortages are logged once.
+    short: std::collections::BTreeSet<u32>,
+}
+
+/// Everything history is simulated from.
+pub struct HistoryInputs<'a> {
+    pub config: &'a WorldConfig,
+    pub biomes: &'a Biomes,
+    pub habitability: &'a Habitability,
+    pub peoples: &'a Peoples,
+    pub settlements: &'a Settlements,
+    pub resources: &'a Resources,
+    pub roads: &'a Roads,
+    pub realms: &'a Realms,
 }
 
 /// A history run in progress.
@@ -66,14 +92,17 @@ pub struct HistoryJob {
 }
 
 impl HistoryJob {
-    pub fn new(
-        config: &WorldConfig,
-        biomes: &Biomes,
-        habitability: &Habitability,
-        peoples: &Peoples,
-        settlements: &Settlements,
-        realms: &Realms,
-    ) -> Self {
+    pub fn new(input: &HistoryInputs) -> Self {
+        let HistoryInputs {
+            config,
+            biomes,
+            habitability,
+            peoples,
+            settlements,
+            resources,
+            roads,
+            realms,
+        } = *input;
         let (w, h) = (realms.width, realms.height);
         let spacing = config.settlements.min_spacing * w as f32 / 512.0;
         let ctx = Context {
@@ -101,6 +130,13 @@ impl HistoryJob {
             spacing,
             empire_formation: config.politics.empire_formation,
             fragmentation: config.politics.fragmentation_rate,
+            output: resources.output.clone(),
+            farming: resources.farming.clone(),
+            deposits: resources.deposits.clone(),
+            catchment: config.resources.catchment_radius * w as f32 / 512.0,
+            roads: roads.clone(),
+            trade: config.trade.clone(),
+            short: Default::default(),
         };
         let initial = HistoryState::initial(realms, settlements);
         let mut job = Self {
@@ -201,8 +237,185 @@ impl HistoryJob {
         self.conquests(year, rng);
         self.border_drift(year, rng);
         self.splits(year, rng);
+        if year.is_multiple_of(self.ctx.trade.interval.max(1)) {
+            self.trade_season(year);
+        }
         self.settlement_life(year, rng);
         self.foundings(year, rng);
+    }
+
+    /// One trade season. For each resource, settlements short of it (largest
+    /// need first) buy from the cheapest-to-reach settlements with a
+    /// surplus, along the transport network, losing a share in transit.
+    /// Realms whose land a route crosses take a toll. Routes that start or
+    /// stop carrying goods, new hubs and new shortages are logged.
+    fn trade_season(&mut self, year: u32) {
+        let n = self.ctx.roads.settlement_count;
+        let alive: Vec<u32> = (0..n as u32)
+            .filter(|&s| self.state.settlements[s as usize].alive)
+            .collect();
+        let mut balance: Vec<Goods> = vec![[0.0; Resource::COUNT]; n];
+        for &s in &alive {
+            let st = &self.state.settlements[s as usize];
+            let thousands = st.population as f32 / 1000.0;
+            for r in Resource::ALL {
+                let mut made = self.ctx.output[s as usize][r.index()];
+                if r == Resource::Grain {
+                    made += self.ctx.farming[s as usize] * thousands;
+                }
+                balance[s as usize][r.index()] = made - r.consumption_per_thousand() * thousands;
+            }
+        }
+
+        let mut flows = Vec::new();
+        let mut unmet_grain = Vec::new();
+        for r in Resource::ALL {
+            let k = r.index();
+            let mut needy: Vec<u32> = alive
+                .iter()
+                .copied()
+                .filter(|&s| balance[s as usize][k] < 0.0)
+                .collect();
+            needy.sort_by(|&a, &b| {
+                balance[a as usize][k]
+                    .total_cmp(&balance[b as usize][k])
+                    .then(a.cmp(&b))
+            });
+            for &buyer in &needy {
+                for _ in 0..3 {
+                    let need = -balance[buyer as usize][k];
+                    if need <= 1e-3 {
+                        break;
+                    }
+                    let seller = alive
+                        .iter()
+                        .copied()
+                        .filter(|&s| {
+                            balance[s as usize][k] > 1e-3
+                                && self.ctx.roads.distance(s, buyer).is_finite()
+                        })
+                        .min_by(|&a, &b| {
+                            let (da, db) = (
+                                self.ctx.roads.distance(a, buyer),
+                                self.ctx.roads.distance(b, buyer),
+                            );
+                            da.total_cmp(&db).then(a.cmp(&b))
+                        });
+                    let Some(seller) = seller else {
+                        break;
+                    };
+                    let loss = (self.ctx.trade.loss_per_cost
+                        * self.ctx.roads.distance(seller, buyer))
+                    .min(0.5);
+                    // Send enough that what arrives covers the need, if the
+                    // seller has it.
+                    let shipped = balance[seller as usize][k].min(need / (1.0 - loss));
+                    let received = shipped * (1.0 - loss);
+                    balance[seller as usize][k] -= shipped;
+                    balance[buyer as usize][k] += received;
+                    flows.push(Flow {
+                        from: seller,
+                        to: buyer,
+                        resource: r,
+                        shipped,
+                        received,
+                    });
+                }
+                if r == Resource::Grain {
+                    let st = &self.state.settlements[buyer as usize];
+                    let use_ =
+                        Resource::Grain.consumption_per_thousand() * st.population as f32 / 1000.0;
+                    if -balance[buyer as usize][k] > 0.5 * use_ {
+                        unmet_grain.push(buyer);
+                    }
+                }
+            }
+        }
+
+        // Tolls: every realm a route's stops lie in takes its share.
+        let mut tolls = std::collections::BTreeMap::<u16, f32>::new();
+        let mut through = vec![0.0f32; n];
+        for f in &flows {
+            let route = self.ctx.roads.route(f.from, f.to);
+            let realms: std::collections::BTreeSet<u16> = route
+                .iter()
+                .map(|&s| self.state.owner[self.state.settlements[s as usize].cell as usize])
+                .filter(|&r| r != NO_REALM)
+                .collect();
+            for r in &realms {
+                *tolls.entry(*r).or_insert(0.0) +=
+                    self.ctx.trade.toll_rate * f.shipped / realms.len() as f32;
+            }
+            for &s in &route {
+                through[s as usize] += f.shipped;
+            }
+        }
+        let season = self.emit(
+            year,
+            EventKind::TradeSeason {
+                flows: flows.clone(),
+                tolls: tolls.into_iter().collect(),
+            },
+        );
+
+        // Routes that opened and closed this season.
+        let mut now: Vec<(u32, u32)> = flows
+            .iter()
+            .filter(|f| f.shipped >= 1.0)
+            .map(|f| (f.from, f.to))
+            .collect();
+        now.sort_unstable();
+        now.dedup();
+        let before = self.state.routes.clone();
+        for &(from, to) in &now {
+            if before.binary_search(&(from, to)).is_err() {
+                self.emit(
+                    year,
+                    EventKind::TradeRouteOpened {
+                        from,
+                        to,
+                        cause: Cause::Demand,
+                    },
+                );
+            }
+        }
+        for &(from, to) in &before {
+            if now.binary_search(&(from, to)).is_err() {
+                self.emit(
+                    year,
+                    EventKind::TradeRouteClosed {
+                        from,
+                        to,
+                        cause: Cause::NoLongerNeeded,
+                    },
+                );
+            }
+        }
+        for (s, &volume) in through.iter().enumerate() {
+            if volume >= self.ctx.trade.hub_threshold && !self.state.settlements[s].hub {
+                self.emit(
+                    year,
+                    EventKind::TradeHub {
+                        settlement: s as u32,
+                        cause: Cause::Event(season),
+                    },
+                );
+            }
+        }
+        let short_now: std::collections::BTreeSet<u32> = unmet_grain.into_iter().collect();
+        for &s in &short_now {
+            if !self.ctx.short.contains(&s) {
+                self.emit(
+                    year,
+                    EventKind::Shortage {
+                        settlement: s,
+                        resource: Resource::Grain,
+                        cause: Cause::Hardship,
+                    },
+                );
+            }
+        }
+        self.ctx.short = short_now;
     }
 
     fn next_name(&mut self, people: u16, kind: NameKind) -> String {
@@ -490,7 +703,9 @@ impl HistoryJob {
             }
             // Logistic growth towards what the land supports, plus good and
             // bad decades.
-            let capacity = self.ctx.capacity[s as usize].max(1.0);
+            // Trade lifts what a settlement can support, by up to half.
+            let traded = (st.trade / (st.population as f32 / 1000.0).max(0.1)).min(1.0);
+            let capacity = self.ctx.capacity[s as usize].max(1.0) * (1.0 + 0.5 * traded);
             let before = st.population as f32;
             let growth = 0.25 * (1.0 - before / capacity) + (unit_f32(rng) - 0.5) * 0.16;
             let after = (before * (1.0 + growth)).round().max(20.0);
@@ -550,6 +765,20 @@ impl HistoryJob {
             self.ctx
                 .capacity
                 .push(self.ctx.base_population * 0.6 * land.powf(1.5));
+            self.ctx.output.push(deposit_output(
+                cell as usize,
+                &self.ctx.deposits,
+                self.ctx.width,
+                self.ctx.catchment,
+            ));
+            let (w, h) = (self.ctx.width, self.ctx.height);
+            self.ctx.farming.push(farming_yield(
+                cell as usize,
+                &self.ctx.habitability,
+                w,
+                h,
+                self.ctx.catchment,
+            ));
             self.emit(
                 year,
                 EventKind::SettlementFounded {

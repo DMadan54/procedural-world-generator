@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::resources::Resource;
+
 /// A ruler: name, house and year of birth (negative = before year 0).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ruler {
@@ -36,6 +38,12 @@ pub enum Cause {
     Overextension,
     /// Settlers moved into empty good land.
     Settlement,
+    /// A settlement needed goods it couldn't make.
+    Demand,
+    /// The need that kept a route open has passed.
+    NoLongerNeeded,
+    /// Goods flowed through a place in quantity.
+    Trade,
     /// The direct consequence of an earlier event in the log.
     Event(u32),
 }
@@ -86,7 +94,10 @@ pub enum EventKind {
         cause: Cause,
     },
     /// A realm ceases to exist.
-    RealmFell { realm: u16, cause: Cause },
+    RealmFell {
+        realm: u16,
+        cause: Cause,
+    },
     /// Part of a realm breaks away as a new realm.
     RealmSplit {
         realm: u16,
@@ -99,6 +110,46 @@ pub enum EventKind {
         cells: Vec<u32>,
         cause: Cause,
     },
+    /// A trade season: every flow of goods and the tolls realms collected.
+    TradeSeason {
+        flows: Vec<Flow>,
+        /// `(realm, toll)`, sorted by realm.
+        tolls: Vec<(u16, f32)>,
+    },
+    /// Goods began to flow regularly between two settlements.
+    TradeRouteOpened {
+        from: u32,
+        to: u32,
+        cause: Cause,
+    },
+    TradeRouteClosed {
+        from: u32,
+        to: u32,
+        cause: Cause,
+    },
+    /// A settlement became a trade hub.
+    TradeHub {
+        settlement: u32,
+        cause: Cause,
+    },
+    /// A settlement couldn't get enough of something.
+    Shortage {
+        settlement: u32,
+        resource: Resource,
+        cause: Cause,
+    },
+}
+
+/// Goods moved in one trade season.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Flow {
+    pub from: u32,
+    pub to: u32,
+    pub resource: Resource,
+    /// Amount sent.
+    pub shipped: f32,
+    /// Amount that arrived; the rest was lost on the way.
+    pub received: f32,
 }
 
 /// One entry of the log. Ordered by `(year, seq)`.
@@ -133,6 +184,11 @@ impl EventKind {
             | EventKind::SettlementShrank { settlement, .. }
             | EventKind::SettlementRenamed { settlement, .. } => vec![*settlement],
             EventKind::RealmSplit { capital, .. } => vec![*capital],
+            EventKind::TradeRouteOpened { from, to, .. }
+            | EventKind::TradeRouteClosed { from, to, .. } => vec![*from, *to],
+            EventKind::TradeHub { settlement, .. } | EventKind::Shortage { settlement, .. } => {
+                vec![*settlement]
+            }
             _ => Vec::new(),
         }
     }
@@ -141,7 +197,11 @@ impl EventKind {
     pub fn is_minor(&self) -> bool {
         matches!(
             self,
-            EventKind::SettlementGrew { .. } | EventKind::SettlementShrank { .. }
+            EventKind::SettlementGrew { .. }
+                | EventKind::SettlementShrank { .. }
+                | EventKind::TradeSeason { .. }
+                | EventKind::TradeRouteOpened { .. }
+                | EventKind::TradeRouteClosed { .. }
         )
     }
 }

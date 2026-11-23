@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::event::{Event, EventKind, Ruler};
+use super::event::{Event, EventKind, Flow, Ruler};
 use crate::realms::{Realms, NO_REALM};
 use crate::settlements::{Rank, Settlements};
 
@@ -22,6 +22,8 @@ pub struct RealmState {
     /// Territory size in cells.
     pub cells: u32,
     pub founded: u32,
+    /// Treasure from tolls on trade through the realm's land.
+    pub wealth: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -32,6 +34,9 @@ pub struct SettlementState {
     pub rank: Rank,
     pub population: u32,
     pub alive: bool,
+    /// Goods passing through or arriving in the last trade season.
+    pub trade: f32,
+    pub hub: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -47,6 +52,10 @@ pub struct HistoryState {
     pub owner: Vec<u16>,
     pub realms: Vec<RealmState>,
     pub settlements: Vec<SettlementState>,
+    /// Flows of the latest trade season.
+    pub trade: Vec<Flow>,
+    /// Routes goods flow along regularly, as `(from, to)`, sorted.
+    pub routes: Vec<(u32, u32)>,
 }
 
 impl HistoryState {
@@ -71,6 +80,7 @@ impl HistoryState {
                     alive: true,
                     cells: r.cells,
                     founded: 0,
+                    wealth: 0.0,
                 })
                 .collect(),
             settlements: settlements
@@ -83,8 +93,12 @@ impl HistoryState {
                     rank: s.rank,
                     population: s.population,
                     alive: true,
+                    trade: 0.0,
+                    hub: false,
                 })
                 .collect(),
+            trade: Vec::new(),
+            routes: Vec::new(),
         }
     }
 
@@ -143,6 +157,8 @@ impl HistoryState {
                     rank: Rank::Village,
                     population: *population,
                     alive: true,
+                    trade: 0.0,
+                    hub: false,
                 });
             }
             EventKind::SettlementGrew {
@@ -196,9 +212,37 @@ impl HistoryState {
                     alive: true,
                     cells: n,
                     founded: event.year,
+                    wealth: 0.0,
                 });
                 self.settlements[*capital as usize].rank = Rank::Capital;
             }
+            EventKind::TradeSeason { flows, tolls } => {
+                for s in &mut self.settlements {
+                    s.trade = 0.0;
+                }
+                for f in flows {
+                    self.settlements[f.from as usize].trade += f.shipped;
+                    self.settlements[f.to as usize].trade += f.received;
+                }
+                for &(realm, toll) in tolls {
+                    self.realms[realm as usize].wealth += toll;
+                }
+                self.trade = flows.clone();
+            }
+            EventKind::TradeRouteOpened { from, to, .. } => {
+                if let Err(at) = self.routes.binary_search(&(*from, *to)) {
+                    self.routes.insert(at, (*from, *to));
+                }
+            }
+            EventKind::TradeRouteClosed { from, to, .. } => {
+                if let Ok(at) = self.routes.binary_search(&(*from, *to)) {
+                    self.routes.remove(at);
+                }
+            }
+            EventKind::TradeHub { settlement, .. } => {
+                self.settlements[*settlement as usize].hub = true;
+            }
+            EventKind::Shortage { .. } => {}
         }
     }
 }

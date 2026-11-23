@@ -11,8 +11,8 @@ mod event;
 mod sim;
 mod state;
 
-pub use event::{Cause, Event, EventKind, Ruler};
-pub use sim::HistoryJob;
+pub use event::{Cause, Event, EventKind, Flow, Ruler};
+pub use sim::{HistoryInputs, HistoryJob};
 pub use state::{HistoryState, RealmState, SettlementState};
 
 /// A finished history: the full event log and the snapshots that make
@@ -173,6 +173,43 @@ mod tests {
                 assert_eq!(cells, 0, "fallen realm {id} still owns land");
             }
         }
+    }
+
+    #[test]
+    fn trade_conserves_goods() {
+        let world = World::generate(&small(42));
+        let mut seasons = 0;
+        for e in &world.history.events {
+            if let EventKind::TradeSeason { flows, tolls } = &e.kind {
+                seasons += 1;
+                for f in flows {
+                    assert!(f.shipped > 0.0 && f.received > 0.0);
+                    assert!(f.received <= f.shipped + 1e-4);
+                    // At most half is lost, and nothing appears from nowhere.
+                    assert!(f.received >= 0.5 * f.shipped - 1e-4);
+                    let lost = f.shipped - f.received;
+                    assert!((f.received + lost - f.shipped).abs() < 1e-4);
+                    assert!(world.roads.distance(f.from, f.to).is_finite());
+                    assert_ne!(f.from, f.to);
+                }
+                assert!(tolls.windows(2).all(|p| p[0].0 < p[1].0));
+                assert!(tolls.iter().all(|&(r, t)| (r as usize)
+                    < world.history.state_at(e.year).realms.len()
+                    && t >= 0.0));
+            }
+        }
+        assert!(seasons > 0);
+    }
+
+    #[test]
+    fn trade_settings_change_only_history() {
+        let base = World::generate(&small(42));
+        let mut config = small(42);
+        config.trade.toll_rate = 0.3;
+        let changed = World::generate(&config);
+        assert_eq!(base.roads, changed.roads);
+        assert_eq!(base.resources, changed.resources);
+        assert_ne!(base.history, changed.history);
     }
 
     #[test]

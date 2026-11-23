@@ -15,7 +15,7 @@ use crate::erosion::{erode, ErosionJob};
 use crate::fractal::fbm_field;
 use crate::habitability::{generate_habitability, Habitability};
 use crate::heightmap::{blend_heightmap, Heightmap};
-use crate::history::{History, HistoryJob};
+use crate::history::{History, HistoryInputs, HistoryJob};
 use crate::hydrology::{generate_hydrology, Hydrology};
 use crate::peoples::{generate_peoples, Peoples};
 use crate::realms::{generate_realms, Realms};
@@ -145,14 +145,16 @@ impl World {
         );
         let roads = generate_roads(config, &hydrology, &biomes, &settlements, &travel_cost);
         let realms = generate_realms(config, &biomes, &peoples, &settlements, &travel_cost);
-        let history = HistoryJob::new(
+        let history = HistoryJob::new(&HistoryInputs {
             config,
-            &biomes,
-            &habitability,
-            &peoples,
-            &settlements,
-            &realms,
-        )
+            biomes: &biomes,
+            habitability: &habitability,
+            peoples: &peoples,
+            settlements: &settlements,
+            resources: &resources,
+            roads: &roads,
+            realms: &realms,
+        })
         .finish();
         Self {
             config: config.clone(),
@@ -215,6 +217,9 @@ impl World {
         let roads = settlements || travel || config.roads != old.roads;
         let realms = settlements || travel || config.realms != old.realms;
         let history = realms
+            || resources
+            || roads
+            || config.trade != old.trade
             || self.pending.history.is_some()
             || config.history != old.history
             || config.politics.empire_formation != old.politics.empire_formation
@@ -355,6 +360,7 @@ impl World {
                 &self.settlements,
             );
             self.pending.resources = false;
+            self.pending.history_restart = true;
         }
         if self.pending.roads {
             self.roads = generate_roads(
@@ -365,6 +371,7 @@ impl World {
                 &self.travel_cost,
             );
             self.pending.roads = false;
+            self.pending.history_restart = true;
         }
         if self.pending.realms {
             self.realms = generate_realms(
@@ -378,14 +385,16 @@ impl World {
             self.pending.history_restart = true;
         }
         if self.pending.history_restart {
-            self.pending.history = Some(HistoryJob::new(
-                &self.config,
-                &self.biomes,
-                &self.habitability,
-                &self.peoples,
-                &self.settlements,
-                &self.realms,
-            ));
+            self.pending.history = Some(HistoryJob::new(&HistoryInputs {
+                config: &self.config,
+                biomes: &self.biomes,
+                habitability: &self.habitability,
+                peoples: &self.peoples,
+                settlements: &self.settlements,
+                resources: &self.resources,
+                roads: &self.roads,
+                realms: &self.realms,
+            }));
             self.pending.history_restart = false;
         }
         if let Some(job) = &mut self.pending.history {
@@ -463,7 +472,7 @@ mod tests {
         if run.settlements || run.travel {
             run.realms = true;
         }
-        if run.realms {
+        if run.realms || run.resources || run.roads {
             run.history = true;
         }
         run

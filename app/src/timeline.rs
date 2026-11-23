@@ -293,6 +293,38 @@ pub fn describe(event: &Event, names: &HistoryState) -> String {
                 cause_text(Cause::Overextension)
             )
         }
+        EventKind::TradeSeason { flows, .. } => {
+            let goods: f32 = flows.iter().map(|f| f.received).sum();
+            format!(
+                "Trade season: {} shipments, {goods:.0} loads delivered",
+                flows.len()
+            )
+        }
+        EventKind::TradeRouteOpened { from, to, .. } => format!(
+            "Trade opens from {} to {}",
+            settlement_name(names, *from),
+            settlement_name(names, *to)
+        ),
+        EventKind::TradeRouteClosed { from, to, .. } => format!(
+            "Trade from {} to {} dries up",
+            settlement_name(names, *from),
+            settlement_name(names, *to)
+        ),
+        EventKind::TradeHub { settlement, .. } => {
+            format!(
+                "{} becomes a great market town",
+                settlement_name(names, *settlement)
+            )
+        }
+        EventKind::Shortage {
+            settlement,
+            resource,
+            ..
+        } => format!(
+            "{} goes short of {}",
+            settlement_name(names, *settlement),
+            resource.name()
+        ),
     }
 }
 

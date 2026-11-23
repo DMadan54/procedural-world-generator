@@ -138,7 +138,7 @@ pub fn generate_resources(
     let farming = settlements
         .settlements
         .iter()
-        .map(|s| farming_yield(s.cell, habitability, catchment))
+        .map(|s| farming_yield(s.cell, &habitability.value, w, h, catchment))
         .collect();
     Resources {
         width: w,
@@ -298,14 +298,13 @@ pub fn deposit_output(cell: usize, deposits: &[Deposit], w: usize, radius: f32) 
 }
 
 /// Grain grown per 1000 people: better land feeds more than its own.
-pub fn farming_yield(cell: usize, habitability: &Habitability, radius: f32) -> f32 {
-    let (w, h) = (habitability.width, habitability.height);
+pub fn farming_yield(cell: usize, habitability: &[f32], w: usize, h: usize, radius: f32) -> f32 {
     let r = radius.round().max(1.0) as usize;
     let (x, y) = (cell % w, cell / w);
     let (mut sum, mut n) = (0.0, 0.0);
     for ny in y.saturating_sub(r)..(y + r + 1).min(h) {
         for nx in x.saturating_sub(r)..(x + r + 1).min(w) {
-            sum += habitability.value[ny * w + nx];
+            sum += habitability[ny * w + nx];
             n += 1.0;
         }
     }
