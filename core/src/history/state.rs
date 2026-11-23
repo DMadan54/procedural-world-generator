@@ -172,6 +172,7 @@ pub struct HistoryState {
     pub width: usize,
     pub height: usize,
     /// Per cell: owning realm or `NO_REALM`.
+    #[serde(with = "crate::export::base64::u16s")]
     pub owner: Vec<u16>,
     pub realms: Vec<RealmState>,
     pub settlements: Vec<SettlementState>,
@@ -192,6 +193,7 @@ pub struct HistoryState {
     /// Rivers that have moved so far.
     pub rivers: Vec<RiverChange>,
     /// Per cell: under the Blight.
+    #[serde(with = "crate::export::base64::bools")]
     pub blight: Vec<bool>,
 }
 

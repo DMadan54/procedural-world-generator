@@ -111,6 +111,12 @@ impl Language {
     }
 
     /// What the people call themselves.
+    /// The seed this language was generated from; with `id`,
+    /// `Language::generate(seed, id)` rebuilds it.
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
     pub fn people_name(&self) -> String {
         let rng = &mut self.rng(stage::NAMES_PEOPLE, 0);
         let stem = self.word(rng, 1, 2, false);

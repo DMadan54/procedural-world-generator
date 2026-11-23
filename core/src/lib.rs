@@ -18,6 +18,7 @@ pub mod biome;
 pub mod climate;
 pub mod config;
 pub mod erosion;
+pub mod export;
 mod field;
 pub mod fractal;
 pub mod habitability;

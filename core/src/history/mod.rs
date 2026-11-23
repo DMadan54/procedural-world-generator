@@ -40,6 +40,40 @@ pub struct History {
 }
 
 impl History {
+    /// Rebuilds a history from its event log (as exported), taking the
+    /// snapshots again by replay.
+    pub fn from_log(
+        initial: HistoryState,
+        events: Vec<Event>,
+        years: u32,
+        snapshot_interval: u32,
+    ) -> Self {
+        let interval = snapshot_interval.max(1);
+        let mut state = initial.clone();
+        let mut snapshots = Vec::new();
+        let mut next = 0;
+        for k in 0..=years / interval {
+            let year = k * interval;
+            while next < events.len() && events[next].year <= year {
+                state.apply(&events[next]);
+                next += 1;
+            }
+            snapshots.push(state.clone());
+        }
+        Self {
+            years,
+            events,
+            initial,
+            snapshot_interval: interval,
+            snapshots,
+        }
+    }
+
+    /// Years between snapshots.
+    pub fn snapshot_interval(&self) -> u32 {
+        self.snapshot_interval
+    }
+
     /// The state at the end of `year` (clamped to the simulated range).
     pub fn state_at(&self, year: u32) -> HistoryState {
         let year = year.min(self.years);
